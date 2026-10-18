@@ -206,7 +206,7 @@ $env:GITHUB_TOKEN='<GitHub 令牌>'; $env:GITEA_TOKEN='<Gitea 令牌>'
 
 | 资产 | 作用 |
 |---|---|
-| `UniversityTodos-<tag>-win-x64.zip` | 更新包，**内含单个 exe**（trim 模式，约 40 MB） |
+| `UniversityTodos-<tag>-win-x64.zip` | 更新包，**内含单个 exe**（trim 模式，约 18 MB） |
 | `update-manifest.json` | 更新清单：确切文件名 + SHA256 + 大小（含 android 字段） |
 
 Android APK（`UniversityTodos-<tag>-android.apk`）也放在同一个 release，
