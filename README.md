@@ -173,12 +173,14 @@
    `<安装目录>\Data`；
 4. 检查作业/待办/课表/登录态是否齐全；缺什么再从备份补。
 
-**方式二：手动复制（免安装 zip 或想自己控制）**
+**方式二：手动复制（跳过了迁移页，或想自己控制）**
 
-1. 把 `%LOCALAPPDATA%\HomeworkReminder\*.json` 复制到 `<安装目录>\Data\`
+1. 如果用的是安装版：`<安装目录>\Data` 已经存在，直接进行第 3 步；
+2. 如果用的是 zip：把 exe 放进一个**可写目录**，在 exe 旁新建空文件 `portable.flag`
+   和 `Data` 文件夹（不建标记就仍是兼容模式，数据继续留在旧目录，不需要迁移）；
+3. 把 `%LOCALAPPDATA%\HomeworkReminder\*.json` 复制到 `Data\`
    （只复制 JSON，不要复制 `startup.log`、`.WebView2` 缓存）；
-2. 确认 `<安装目录>\portable.flag` 存在；没有就新建一个空文件；
-3. 启动应用，按上面的方法核对「数据位置」。
+4. 启动应用，按上面的方法核对「数据位置」。
 
 **换机 / 换 Windows 用户时**：`session.json`、`chaoxing-session.json`、`pigai-session.json`
 是 DPAPI 密文，只能在同一台机器的同一 Windows 用户下解密；迁移后如果提示未登录，
@@ -266,7 +268,7 @@ $env:GITHUB_TOKEN='<GitHub 令牌>'; $env:GITEA_TOKEN='<Gitea 令牌>'
 > 两个源的失败**互不阻断**：任一失败会记录并继续，最后汇总以非零码退出，
 > 并打印补传命令。所以可以先只配一个令牌、之后再补另一个。
 
-要在某个 release 上启用「应用内一键更新」，该 release 必须同时包含两个资产：
+要在某个 release 上启用「应用内一键更新」，该 release 至少包含下面前两个资产（安装包与 APK 可选）：
 
 | 资产 | 作用 |
 |---|---|
