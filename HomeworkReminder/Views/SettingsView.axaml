@@ -492,6 +492,23 @@
               <TextBlock Text="{Binding UpdateStatus}" FontSize="11" TextWrapping="Wrap"
                          Foreground="{DynamicResource TodoTextTertiary}"
                          IsVisible="{Binding UpdateStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+              <!-- 安装版下载：与「下载并更新」分开，安装程序不能在本进程运行时替换文件 -->
+              <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding ShowDesktopSettings}">
+                <Button Classes="outline" Content="下载安装版…" Padding="10,5" FontSize="12"
+                        Command="{Binding DownloadInstallerCommand}"
+                        IsEnabled="{Binding !IsDownloadingInstaller}"
+                        ToolTip.Tip="下载 Windows 安装包；下载后请先退出本程序，再运行安装向导" />
+                <Button Classes="outline" Content="打开下载文件夹" Padding="10,5" FontSize="12"
+                        Command="{Binding OpenInstallerFolderCommand}"
+                        IsVisible="{Binding HasDownloadedInstaller}" />
+              </StackPanel>
+              <TextBlock Text="{Binding InstallerDownloadProgress}" FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoAccent}"
+                         IsVisible="{Binding InstallerDownloadProgress, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+              <TextBlock Text="{Binding InstallerDownloadStatus}" FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoTextTertiary}"
+                         IsVisible="{Binding InstallerDownloadStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
             </StackPanel>
 
             <!-- 数据备份（便携程序，数据只在本机） -->

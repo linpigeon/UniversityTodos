@@ -7,6 +7,36 @@
 >
 > 历史版本：v1.2.0（基线，双端）→ v1.1.0（桌面）→ v1.0.0（桌面）。
 
+## v1.4.5（2026-10-18）· 应用内「下载安装版」入口
+
+### 新增
+
+- **设置 → 关于 → 下载安装版…**：从 GitHub / Gitea 的 release 里解析最新的
+  `UniversityTodos-<tag>-Setup.exe`，下载到 `%USERPROFILE%\Downloads`。
+  - 优先读更新清单里的 `installer.sha256` 校验；没有清单的旧 release 退回按资产名下载，
+    并在界面明确标注「未能校验」。
+  - 下载成功后可一键打开下载文件夹；**不会自动运行安装包**——安装程序会检测本进程
+    正在运行而拒绝替换，界面会提示先退出再运行。
+  - 依次尝试多个源：GitHub 的 releases/download 在国内经常连不通，失败后自动换 Gitea。
+- **更新清单增加 `installer` 字段**：`release.ps1 -Installer` 现在会把安装包的文件名、
+  SHA256、大小写进 `update-manifest.json`，应用内下载据此校验。
+- **`--installercheck [目录]`**：命令行自检，解析最新安装包并在传目录时实际下载校验，
+  不依赖界面与登录态。
+- **修正清单解析的 BOM 兼容**：发布脚本写出的 `update-manifest.json` 带 UTF-8 BOM，
+  某些路径把原文直接交给 `JsonSerializer` 会失败；现在统一剥掉 BOM 再解析。
+
+### 说明
+
+- 安装包仍未做代码签名（仓库不包含证书，当前构建机也没有 signtool），
+  Windows SmartScreen 仍可能提示；README 增加了「代码签名」一节说明需要什么证书与命令。
+- 安装包下载入口只负责下载，不替代「下载并更新」（后者针对 zip 更新包）。
+
+### 验证
+
+- `--jsoncheck` **67/67**（新增 installer 字段解析断言）。
+- `--installercheck` 实测：解析到 Gitea 的 v1.4.4 Setup，下载 13,599,198 字节，
+  SHA256 与清单一致。
+- 桌面/Android 构建 0 警告 0 错误；`--selfcheck`、`--androidcheck` 无回归。
 ## v1.4.4（2026-10-18）· 新增 Windows 安装程序；数据与缓存收进安装目录
 
 ### 新增

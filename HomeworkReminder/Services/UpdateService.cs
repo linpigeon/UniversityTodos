@@ -74,6 +74,20 @@ public sealed class UpdateManifest
     [JsonPropertyName("size")] public long Size { get; set; }
     /// <summary>该包内单文件的名字（单文件发布时就是 exe 名）。</summary>
     [JsonPropertyName("entry")] public string? Entry { get; set; }
+
+    /// <summary>
+    /// Windows 安装包信息（可选）。用于应用内「下载安装版」入口：
+    /// 有哈希就校验，没有则退回按资产名下载。
+    /// </summary>
+    [JsonPropertyName("installer")] public UpdateManifestInstaller? Installer { get; set; }
+}
+
+/// <summary>更新清单里的安装包条目。</summary>
+public sealed class UpdateManifestInstaller
+{
+    [JsonPropertyName("file")] public string? File { get; set; }
+    [JsonPropertyName("sha256")] public string? Sha256 { get; set; }
+    [JsonPropertyName("size")] public long Size { get; set; }
 }
 
 /// <summary>
@@ -255,18 +269,88 @@ public static class UpdateService
     }
 
     /// <summary>
+    /// 候选安装包（每个源一条）。<see cref="Asset"/> 的下载地址已由
+    /// <see cref="QuerySourceAsync"/> 改写成仓库标准下载路径。
+    /// </summary>
+    public sealed record InstallerChoice(
+        string Version, ReleaseAsset Asset, UpdateManifest? Manifest, string Source);
+
+    /// <summary>
+    /// 查找最新 release 里的 Windows 安装包。
+    /// <para>
+    /// 返回**多个源**而不仅一个：GitHub 的 releases/download 在国内经常连不通，
+    /// 调用方应逐个尝试，失败的源不影响后面的 Gitea。排序：版本新 → 有清单哈希 → Gitea 优先。
+    /// </para>
+    /// <para>
+    /// 没有清单的旧 release 也能工作：按资产名 <c>*-Setup.exe</c> 兜底，只是无法校验哈希。
+    /// </para>
+    /// </summary>
+    public static async Task<List<InstallerChoice>> FindInstallersAsync(
+        bool includePrerelease = false, CancellationToken ct = default)
+    {
+        var results = await Task.WhenAll(
+                Sources.Select(s => QuerySourceAsync(s.Name, s.ApiUrl, s.RepoUrl, includePrerelease, ct)))
+            .ConfigureAwait(false);
+
+        await Task.WhenAll(results.Select(r => ResolveManifestAsync(r.Release, ct, force: true)))
+            .ConfigureAwait(false);
+
+        var choices = new List<InstallerChoice>();
+        foreach (var result in results)
+        {
+            if (result.Release is not { TagName: { Length: > 0 } tag, Assets: { Count: > 0 } assets })
+                continue;
+
+            var manifest = ParseManifest(result.Release.ManifestJson);
+            var declared = manifest?.Installer?.File;
+            var asset = (declared is { Length: > 0 }
+                    ? assets.FirstOrDefault(a =>
+                        string.Equals(a.Name, declared, StringComparison.OrdinalIgnoreCase))
+                    : null)
+                ?? assets.FirstOrDefault(a =>
+                    a.Name is { Length: > 0 } name
+                    && name.EndsWith("-Setup.exe", StringComparison.OrdinalIgnoreCase));
+
+            if (asset?.BrowserDownloadUrl is not { Length: > 0 }) continue;
+            choices.Add(new InstallerChoice(tag, asset, manifest, result.Source));
+        }
+
+        return choices
+            .OrderByDescending(c => ParseVersion(c.Version))
+            .ThenByDescending(c => c.Manifest?.Installer?.Sha256 is { Length: > 0 })
+            .ThenBy(c => string.Equals(c.Source, "Gitea", StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ToList();
+    }
+
+    private static UpdateManifest? ParseManifest(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        try
+        {
+            // 发布脚本写清单时带 UTF-8 BOM；HTTP 读回来的字符串不一定帮我们剥掉，
+            // 直接交给 JsonSerializer 会报「0xEF 不是合法起始字符」。
+            return JsonSerializer.Deserialize(json.TrimStart('\uFEFF'), AppJsonContext.Default.UpdateManifest);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// 取回 release 里的更新清单并填入 <see cref="ReleaseInfo.ManifestJson"/>。
     /// 没有清单、取回失败、或清单过大时都只是留空——**不视为查询失败**，
     /// 因为按文件名兜底挑包仍然可用（只是没有哈希可校验）。
     /// </summary>
-    private static async Task ResolveManifestAsync(ReleaseInfo? release, CancellationToken ct)
+    private static async Task ResolveManifestAsync(ReleaseInfo? release, CancellationToken ct, bool force = false)
     {
         if (release is null) return;
 
         // 只有「确实比本机新」才值得去取清单：已是最新时清单毫无用处（挑了包也用不上），
         // 而它的下载地址在 github.com 上、国内经常连不通——白等一个超时。
         // 实测「已是最新」被拖慢了约 20 秒，正是这么来的。
-        if (release.TagName is not { } tag || !IsNewer(tag)) return;
+        // force=true 用于「下载安装版」：版本相同也要读 installer 哈希。
+        if (release.TagName is not { } tag || (!force && !IsNewer(tag))) return;
 
         var asset = release.Assets?.FirstOrDefault(a =>
             string.Equals(a.Name, ManifestAssetName, StringComparison.OrdinalIgnoreCase));

@@ -177,6 +177,14 @@ if ($Installer) {
     $installerName = "UniversityTodos-$Tag-Setup.exe"
     $installerPath = Join-Path $root "publish\$installerName"
     Copy-Item $Installer $installerPath -Force
+
+    # 写进更新清单：应用内「下载安装版」据此拿到确切文件名与 SHA256。
+    $manifest['installer'] = [ordered]@{
+        file   = $installerName
+        sha256 = (Get-FileHash $installerPath -Algorithm SHA256).Hash
+        size   = (Get-Item $installerPath).Length
+    }
+    $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 }
 
 Write-Host ''

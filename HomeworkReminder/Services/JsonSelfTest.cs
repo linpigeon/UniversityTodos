@@ -2327,6 +2327,19 @@ public static class JsonSelfTest
             }
         });
 
+        Check("更新清单：installer 字段解析", () =>
+        {
+            const string json = """
+                {"version":"1.4.4","file":"a.zip","sha256":"x","size":1,
+                 "installer":{"file":"setup.exe","sha256":"y","size":2}}
+                """;
+            var manifest = JsonSerializer.Deserialize(json, AppJsonContext.Default.UpdateManifest);
+            Assert(manifest?.Installer?.File == "setup.exe"
+                   && manifest.Installer.Sha256 == "y"
+                   && manifest.Installer.Size == 2,
+                "更新清单的 installer 字段没有被解析出来");
+        });
+
         Check("数据备份：导出与恢复", () =>
         {
             var dataDir = Path.Combine(Path.GetTempPath(), "hw-backup-" + Guid.NewGuid().ToString("N"));

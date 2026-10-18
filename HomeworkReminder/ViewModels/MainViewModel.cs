@@ -2300,6 +2300,27 @@ public sealed partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private string _updateDownloadProgress = string.Empty;
 
+    /// <summary>正在下载安装包（与「下载并更新」互不影响）。</summary>
+    [ObservableProperty]
+    private bool _isDownloadingInstaller;
+
+    /// <summary>安装包下载进度（百分比 / 已下载 MB）。</summary>
+    [ObservableProperty]
+    private string _installerDownloadProgress = string.Empty;
+
+    /// <summary>安装包下载结果/引导文案。</summary>
+    [ObservableProperty]
+    private string _installerDownloadStatus = string.Empty;
+
+    /// <summary>最近一次下载成功的安装包路径（用于「打开下载文件夹」）。</summary>
+    [ObservableProperty]
+    private string? _downloadedInstallerPath;
+
+    public bool HasDownloadedInstaller => !string.IsNullOrWhiteSpace(DownloadedInstallerPath);
+
+    partial void OnDownloadedInstallerPathChanged(string? value) =>
+        OnPropertyChanged(nameof(HasDownloadedInstaller));
+
     /// <summary>是否允许点「下载并更新」。</summary>
     [ObservableProperty]
     private bool _canDownloadUpdate;
@@ -2380,6 +2401,109 @@ public sealed partial class MainViewModel : ViewModelBase
     /// </summary>
     [RelayCommand]
     private Task DownloadUpdateAsync() => DownloadAndApplyAsync();
+
+    /// <summary>
+    /// 下载 Windows 安装包（不自动运行：安装程序会检测到本进程正在运行而拒绝替换，
+    /// 所以这里只负责下载、校验并引导用户退出后手动运行）。
+    /// <para>
+    /// 依次尝试各个源：GitHub 的 releases/download 在国内经常连不通，
+    /// 失败后继续用 Gitea，和更新检查的双源策略一致。
+    /// </para>
+    /// </summary>
+    [RelayCommand]
+    private async Task DownloadInstallerAsync()
+    {
+        if (IsDownloadingInstaller) return;
+
+        IsDownloadingInstaller = true;
+        DownloadedInstallerPath = null;
+        InstallerDownloadProgress = string.Empty;
+        InstallerDownloadStatus = "正在查找最新安装包…";
+        try
+        {
+            var choices = await UpdateService
+                .FindInstallersAsync(IncludePrereleaseUpdates)
+                .ConfigureAwait(true);
+            if (choices.Count == 0)
+            {
+                InstallerDownloadStatus = "没有找到安装包：最新 release 里没有 *-Setup.exe。";
+                return;
+            }
+
+            var downloads = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+            Directory.CreateDirectory(downloads);
+
+            var failures = new List<string>();
+            foreach (var choice in choices)
+            {
+                try
+                {
+                    InstallerDownloadStatus = $"正在从 {choice.Source} 下载 {choice.Asset.Name}…";
+
+                    // 复用更新包的下载/校验逻辑：把清单的 installer 条目包装成
+                    // UpdateManifest，DownloadAsync 就会按同一套规则校验哈希与大小。
+                    var manifest = choice.Manifest?.Installer is { } installer
+                        ? new UpdateManifest
+                        {
+                            Version = choice.Version,
+                            File = installer.File,
+                            Sha256 = installer.Sha256,
+                            Size = installer.Size,
+                        }
+                        : null;
+
+                    var progress = new Progress<UpdateService.DownloadProgress>(p =>
+                    {
+                        InstallerDownloadProgress = p.Percent is { } pct
+                            ? $"下载中 {pct}%（{p.Received / 1048576.0:0.0} MB"
+                              + (p.Total > 0 ? $" / {p.Total / 1048576.0:0.0} MB" : string.Empty) + "）"
+                            : $"已下载 {p.Received / 1048576.0:0.0} MB";
+                    });
+
+                    var result = await UpdateService.DownloadAsync(
+                            new UpdateService.PackageChoice(choice.Asset, manifest, choice.Source),
+                            downloads, progress)
+                        .ConfigureAwait(true);
+
+                    DownloadedInstallerPath = result.FilePath;
+                    InstallerDownloadProgress = string.Empty;
+                    InstallerDownloadStatus = result.HashVerified
+                        ? $"已下载并校验通过：{result.FilePath}\n请先退出本程序，再运行安装包（向导可迁移当前数据）。"
+                        : $"已下载：{result.FilePath}\n该 release 未提供安装包哈希，未能校验；请先退出本程序再运行。";
+                    return;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    failures.Add($"{choice.Source}: {UpdateService.DescribeFailure(ex)}");
+                    InstallerDownloadProgress = string.Empty;
+                }
+            }
+
+            InstallerDownloadStatus = "安装包下载失败：" + string.Join("；", failures);
+        }
+        catch (OperationCanceledException)
+        {
+            InstallerDownloadStatus = "安装包下载已取消。";
+        }
+        catch (Exception ex)
+        {
+            InstallerDownloadStatus = "安装包下载失败：" + UpdateService.DescribeFailure(ex);
+        }
+        finally
+        {
+            IsDownloadingInstaller = false;
+        }
+    }
+
+    /// <summary>打开最近下载的安装包所在目录。</summary>
+    [RelayCommand]
+    private void OpenInstallerFolder()
+    {
+        if (DownloadedInstallerPath is not { Length: > 0 } path) return;
+        if (Path.GetDirectoryName(path) is { Length: > 0 } dir)
+            PlatformServices?.OpenFolder(dir);
+    }
 
     /// <summary>下载 → 校验 → 解包 → 启动替换器（多个源时按序回退）。</summary>
     private async Task<bool> DownloadAndApplyAsync(string? targetExeOverride = null)

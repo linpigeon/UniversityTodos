@@ -63,6 +63,18 @@ sealed class Program
         if (args.Contains("--jsoncheck"))
             Environment.Exit(JsonSelfTest.RunAsync().GetAwaiter().GetResult());
 
+        // --installercheck [下载目录]
+        //   验证「找最新安装包 → 按清单哈希下载」；不传目录只解析、不下载。
+        var installerCheckIndex = Array.IndexOf(args, "--installercheck");
+        if (installerCheckIndex >= 0)
+        {
+            var downloadDir = args.Length > installerCheckIndex + 1
+                && !args[installerCheckIndex + 1].StartsWith("--", StringComparison.Ordinal)
+                ? args[installerCheckIndex + 1]
+                : null;
+            Environment.Exit(InstallerSelfTest.Run(downloadDir));
+        }
+
         // --selfcheck [pngPath]
         //   构建窗口、跑一次布局与绑定检查，可选地离屏渲染成 PNG，然后退出。
         //   在无法看到桌面的环境里，这是确认「XAML 与绑定确实能工作」的手段。

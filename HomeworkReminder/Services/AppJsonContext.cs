@@ -63,6 +63,7 @@ namespace HomeworkReminder.Services;
 [JsonSerializable(typeof(ReleaseAsset))]
 [JsonSerializable(typeof(List<ReleaseAsset>))]
 [JsonSerializable(typeof(UpdateManifest))]
+[JsonSerializable(typeof(UpdateManifestInstaller))]
 // ---- 课表（教务系统导入）----
 [JsonSerializable(typeof(ScheduleFile))]
 [JsonSerializable(typeof(ScheduleItem))]

@@ -58,6 +58,7 @@
   - `portable.flag`：安装模式标记。删掉它，应用会回到兼容模式
     （数据在 `%LOCALAPPDATA%\HomeworkReminder`）。
 - 安装向导检测到旧版数据时可勾选「迁移旧数据」；卸载默认**保留** `Data`。
+- 已经在用旧版？打开 **设置 → 关于 → 下载安装版…**，应用会自动下载安装包；下载后先退出再运行。
 - 安装包未做代码签名，Windows SmartScreen 可能提示，选择「更多信息 → 仍要运行」即可。
 
 > 从旧版**自动更新**（zip）过来的用户不会切到安装模式：exe 旁没有 `portable.flag`，
@@ -189,6 +190,31 @@
 **想回到旧位置**：删除 `<安装目录>\portable.flag` 后重启，应用会重新读写
 `%LOCALAPPDATA%\HomeworkReminder`（安装版 `Data` 里的数据会留在原处，可手动合并）。
 
+## 代码签名（需要自备证书）
+
+当前 release 的 exe 与安装包**没有代码签名**，Windows SmartScreen 会提示「未知发布者」。
+这不是脚本能凭空补上的：需要一张受信任的代码签名证书（OV 或 EV），仓库里没有、也不应该提交证书与密码。
+
+拿到证书后（需要 Windows SDK 的 `signtool.exe`）：
+
+```powershell
+# 1. 先签 exe，再打安装包，安装包内才是已签名的程序
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+  /f D:\cert.pfx /p <密码> publish\trim\HomeworkReminder.Desktop.exe
+
+.\tools\build-installer.ps1 -Version 1.4.5
+
+# 2. 再签安装包
+signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
+  /f D:\cert.pfx /p <密码> publish\UniversityTodos-Setup-1.4.5.exe
+
+# 3. 校验签名
+signtool verify /pa /v publish\UniversityTodos-Setup-1.4.5.exe
+```
+
+> 注意：签名只能证明「发布者身份」与「文件未被篡改」；**新证书仍需要积累 SmartScreen 声誉**。
+> EV 证书通常能更快建立信任，OV 证书在下载量积累前仍可能被提示。
+> 签完 exe 后要重新打 zip / 安装包，否则发布产物里的 exe 还是未签名的那一份。
 ## 打包发布
 
 ```powershell
@@ -206,6 +232,7 @@
 ```powershell
 .\HomeworkReminder.Desktop.exe --selfcheck out.png   # 窗口/绑定自检 + 离屏渲染
 .\HomeworkReminder.Desktop.exe --jsoncheck           # 序列化路径自检（裁剪版必过项）
+.\HomeworkReminder.Desktop.exe --installercheck      # 解析最新安装包（传目录则实际下载校验）
 .\HomeworkReminder.Desktop.exe --toastcheck          # 通知链路自检
 .\HomeworkReminder.Desktop.exe --selfcheck-widget w.png  # 小组件渲染自检
 .\HomeworkReminder.Desktop.exe --cxcheck             # 学习通课程任务点在线自检（只读）
@@ -238,20 +265,20 @@
 
 # 2. 打包（安装包依赖 publish\trim）
 .\tools\publish.ps1 -Mode trim -NoPdb
-.\tools\build-installer.ps1 -Version 1.4.4
+.\tools\build-installer.ps1 -Version 1.4.5
 
 # 3. 一键发布：校验版本一致性 → 打包 → 生成 update-manifest.json → 上传
 $env:GITHUB_TOKEN='<GitHub 令牌>'; $env:GITEA_TOKEN='<Gitea 令牌>'
-.\tools\release.ps1 -Tag v1.4.4 -Upload `
-  -Installer .\publish\UniversityTodos-Setup-1.4.4.exe `
+.\tools\release.ps1 -Tag v1.4.5 -Upload `
+  -Installer .\publish\UniversityTodos-Setup-1.4.5.exe `
   -AndroidApk .\HomeworkReminder.Android\bin\Release\net10.0-android\com.CompanyName.HomeworkReminder-Signed.apk
 
 # 只校验并打包、不上传
-.\tools\release.ps1 -Tag v1.4.4
+.\tools\release.ps1 -Tag v1.4.5
 
 # 产物已生成、只想重传（例如补权限后）
-.\tools\release.ps1 -Tag v1.4.4 -SkipBuild -Upload `
-  -Installer .\publish\UniversityTodos-Setup-1.4.4.exe `
+.\tools\release.ps1 -Tag v1.4.5 -SkipBuild -Upload `
+  -Installer .\publish\UniversityTodos-Setup-1.4.5.exe `
   -AndroidApk .\HomeworkReminder.Android\bin\Release\net10.0-android\com.CompanyName.HomeworkReminder-Signed.apk
 ```
 
@@ -274,7 +301,7 @@ $env:GITHUB_TOKEN='<GitHub 令牌>'; $env:GITEA_TOKEN='<Gitea 令牌>'
 |---|---|
 | `UniversityTodos-<tag>-Setup.exe` | Windows 安装包，首次安装用；不参与应用内自动更新 |
 | `UniversityTodos-<tag>-win-x64.zip` | 更新包，**内含单个 exe**（trim 模式，约 18 MB） |
-| `update-manifest.json` | 更新清单：确切文件名 + SHA256 + 大小（含 android 字段） |
+| `update-manifest.json` | 更新清单：确切文件名 + SHA256 + 大小（含 android / installer 字段） |
 
 Android APK（`UniversityTodos-<tag>-android.apk`）也放在同一个 release，
 但**不参与更新链路**——客户端自动更新只针对桌面端。
