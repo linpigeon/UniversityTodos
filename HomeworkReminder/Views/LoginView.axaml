@@ -18,9 +18,9 @@
 
     <!-- ==================== 顶部品牌 ==================== -->
     <StackPanel Grid.Row="0" Margin="36,22,36,0">
-      <TextBlock Text="作业提醒" FontSize="20" FontWeight="SemiBold"
+      <TextBlock Text="大学事项综合待办" FontSize="20" FontWeight="SemiBold"
                  Foreground="{DynamicResource TodoTextPrimary}" />
-      <TextBlock Text="长江雨课堂" FontSize="12" Margin="0,3,0,0"
+      <TextBlock Text="雨课堂 · 学习通 · 批改网" FontSize="12" Margin="0,3,0,0"
                  Foreground="{DynamicResource TodoTextTertiary}" />
     </StackPanel>
 

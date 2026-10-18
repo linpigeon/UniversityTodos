@@ -54,4 +54,13 @@ public interface IPlatformServices
             desktop.Shutdown();
         }
     }
+
+    /// <summary>当前平台是否支持「开机自启」。默认不支持（移动端没有这个概念）。</summary>
+    bool SupportsAutoLaunch => false;
+
+    /// <summary>
+    /// 设置/取消开机自启。返回 null 表示成功，否则是给用户看的原因。
+    /// <para>默认空实现：不支持该能力的平台不应被调用（调用方先看 <see cref="SupportsAutoLaunch"/>）。</para>
+    /// </summary>
+    string? SetAutoLaunch(bool enabled) => null;
 }

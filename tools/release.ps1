@@ -29,7 +29,7 @@ param(
     # 需要在「设置 → 关于」勾选「接收预发布版更新」才看得到，因此不会打扰正式版用户。
     # tag 形如 v1.4.0-pre，版本号仍需与 tag 去掉 v 后一致。
     [switch]$Prerelease,
-    # Android APK 路径（可选）。指定后会按 `HomeworkReminder-<tag>-android.apk` 归档、
+    # Android APK 路径（可选）。指定后会按 `UniversityTodos-<tag>-android.apk` 归档、
     # 登记进更新清单的 android 字段，并随 -Upload 一起上传到两个源。
     # 历史 release 都带 APK，但客户端自动更新只针对桌面端，APK 不参与更新链路。
     [string]$AndroidApk = ''
@@ -84,8 +84,8 @@ if ($normProps -ne $normTag) {
 Write-Host '   一致 ✓' -ForegroundColor Green
 
 # ---- ② 打包 ----
-$pkgDir = Join-Path $root "publish\HomeworkReminder-$Tag-$Runtime"
-$zipName = "HomeworkReminder-$Tag-$Runtime.zip"
+$pkgDir = Join-Path $root "publish\UniversityTodos-$Tag-$Runtime"
+$zipName = "UniversityTodos-$Tag-$Runtime.zip"
 $zipPath = Join-Path $root "publish\$zipName"
 
 if (-not $SkipBuild) {
@@ -150,7 +150,7 @@ if ($AndroidApk) {
         Write-Host "== 指定的 Android APK 不存在：$AndroidApk ==" -ForegroundColor Red
         exit 1
     }
-    $apkName = "HomeworkReminder-$Tag-android.apk"
+    $apkName = "UniversityTodos-$Tag-android.apk"
     $apkPath = Join-Path $root "publish\$apkName"
     Copy-Item $AndroidApk $apkPath -Force
     $manifest['android'] = [ordered]@{
@@ -185,9 +185,15 @@ if (-not $Upload) {
     exit 0
 }
 
-$githubRepo = 'linpigeon/ChangjiangYu_HomeworkReminder'
-$giteaApi = 'https://git.pigeon-lin.top/api/v1/repos/lin/ChangjiangYu_HomeworkReminder'
-$giteaDownload = 'https://git.pigeon-lin.top/lin/ChangjiangYu_HomeworkReminder/releases/download'
+# 两个令牌都没有时，-Upload 什么也做不了；不能打印「完成」并返回 0（CI 会误判成功）。
+if (-not $env:GITHUB_TOKEN -and -not $env:GITEA_TOKEN) {
+    Write-Host '== 指定了 -Upload，但 GITHUB_TOKEN 与 GITEA_TOKEN 都没有设置：什么都没上传 ==' -ForegroundColor Red
+    exit 1
+}
+
+$githubRepo = 'linpigeon/UniversityTodos'
+$giteaApi = 'https://git.pigeon-lin.top/api/v1/repos/lin/UniversityTodos'
+$giteaDownload = 'https://git.pigeon-lin.top/lin/UniversityTodos/releases/download'
 
 # ---- ①.5 release 正文：从 CHANGELOG.md 抽取本版段落 + 追加下载表 ----
 #
@@ -230,9 +236,9 @@ $dl.Add('### 下载')
 $dl.Add('')
 $dl.Add('| 平台 | 文件 | 说明 |')
 $dl.Add('|---|---|---|')
-$dl.Add("| Windows 10/11 x64 | ``HomeworkReminder-$Tag-win-x64.zip`` | 内含单个 ``HomeworkReminder.Desktop.exe``（$([math]::Round((Get-Item $zipPath).Length / 1MB, 2)) MB），解压即用，无需安装运行时 |")
+$dl.Add("| Windows 10/11 x64 | ``UniversityTodos-$Tag-win-x64.zip`` | 内含单个 ``HomeworkReminder.Desktop.exe``（$([math]::Round((Get-Item $zipPath).Length / 1MB, 2)) MB），解压即用，无需安装运行时 |")
 if ($apkPath) {
-    $dl.Add("| Android（API 23+）| ``HomeworkReminder-$Tag-android.apk`` | 使用 Android Debug 证书签名（$([math]::Round((Get-Item $apkPath).Length / 1MB, 2)) MB）；切换正式签名需先卸载 |")
+    $dl.Add("| Android（API 23+）| ``UniversityTodos-$Tag-android.apk`` | 使用 Android Debug 证书签名（$([math]::Round((Get-Item $apkPath).Length / 1MB, 2)) MB）；切换正式签名需先卸载 |")
 }
 $dl.Add('')
 $dl.Add('| 校验 | 值 |')
@@ -284,8 +290,10 @@ if ($env:GITHUB_TOKEN) {
         $ghApi = "https://api.github.com/repos/$githubRepo"
         $ghRelease = Test-Release -Url "$ghApi/releases/tags/$Tag" -Headers $ghHeaders
         if (-not $ghRelease) {
-            Write-Host "   GitHub: 创建 release $Tag"
-            $body = @{ tag_name = $Tag; name = $Tag; body = $releaseBody; draft = $false; prerelease = $prereleaseFlag } | ConvertTo-Json
+            Write-Host "   GitHub: 创建 release $Tag（先 draft，资产传完再公开）"
+            # 先 draft：客户端按 tag 就能看到 release，若资产还没传上去，
+            # 会提示「未找到适用于本平台的更新包」。上传失败时也保持 draft，不留缺包的公开 release。
+            $body = @{ tag_name = $Tag; name = $Tag; body = $releaseBody; draft = $true; prerelease = $prereleaseFlag } | ConvertTo-Json
             $ghRelease = Invoke-RestMethod -Uri "$ghApi/releases" -Method Post -Headers $ghHeaders `
                 -ContentType $jsonUtf8 -Body $body -TimeoutSec 60
         } else {
@@ -309,6 +317,12 @@ if ($env:GITHUB_TOKEN) {
             Invoke-RestMethod -Uri $uploadUrl -Method Post -Headers $ghHeaders `
                 -ContentType 'application/octet-stream' -InFile $asset -TimeoutSec 900 | Out-Null
         }
+
+        # 资产全部上传成功后再公开（已公开的 release 这一步是幂等的）。
+        $publishBody = @{ draft = $false; prerelease = $prereleaseFlag } | ConvertTo-Json
+        $ghRelease = Invoke-RestMethod -Uri "$ghApi/releases/$($ghRelease.id)" -Method Patch -Headers $ghHeaders `
+            -ContentType $jsonUtf8 -Body $publishBody -TimeoutSec 60
+        Write-Host "   GitHub: release $Tag 已公开"
     } catch {
         $uploadFailed += "GitHub"
         Write-Host "   GitHub: 失败 —— $($_.Exception.Message)" -ForegroundColor Red
@@ -366,8 +380,8 @@ if ($env:GITEA_TOKEN) {
         $gtHeaders = @{ Authorization = "token $($env:GITEA_TOKEN)"; 'User-Agent' = 'HomeworkReminder-release' }
         $gtRelease = Test-Release -Url "$giteaApi/releases/tags/$Tag" -Headers $gtHeaders
         if (-not $gtRelease) {
-            Write-Host "   Gitea: 创建 release $Tag"
-            $body = @{ tag_name = $Tag; name = $Tag; body = $releaseBody; draft = $false; prerelease = $prereleaseFlag } | ConvertTo-Json
+            Write-Host "   Gitea: 创建 release $Tag（先 draft，资产传完再公开）"
+            $body = @{ tag_name = $Tag; name = $Tag; body = $releaseBody; draft = $true; prerelease = $prereleaseFlag } | ConvertTo-Json
             $gtRelease = Invoke-RestMethod -Uri "$giteaApi/releases" -Method Post -Headers $gtHeaders `
                 -ContentType $jsonUtf8 -Body $body -TimeoutSec 60
         } else {
@@ -393,6 +407,12 @@ if ($env:GITEA_TOKEN) {
             Send-GiteaAsset -Uri "$giteaApi/releases/$($gtRelease.id)/assets?name=$name" `
                 -Headers $gtHeaders -FieldName 'attachment' -FilePath $asset
         }
+
+        # 资产全部上传成功后再公开（Gitea 的 PATCH release 接口同样接受 draft）。
+        $publishBody = @{ draft = $false; prerelease = $prereleaseFlag } | ConvertTo-Json
+        $gtRelease = Invoke-RestMethod -Uri "$giteaApi/releases/$($gtRelease.id)" -Method Patch -Headers $gtHeaders `
+            -ContentType $jsonUtf8 -Body $publishBody -TimeoutSec 60
+        Write-Host "   Gitea: release $Tag 已公开"
     } catch {
         $uploadFailed += "Gitea"
         Write-Host "   Gitea: 失败 —— $($_.Exception.Message)" -ForegroundColor Red

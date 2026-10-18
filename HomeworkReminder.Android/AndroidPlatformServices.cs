@@ -43,7 +43,17 @@ internal sealed class AndroidPlatformServices : IPlatformServices
             var cm = global::Android.Webkit.CookieManager.Instance;
             var raw = cm?.GetCookie("https://changjiang.yuketang.cn");
             if (cm is null || string.IsNullOrEmpty(raw)) return;
-            cm.SetCookie("https://changjiang-exam.yuketang.cn", raw);
+
+            // CookieManager.SetCookie 一次只接受**一条** Set-Cookie：
+            // 把整条 Cookie 头（"a=1; b=2"）直接传进去时，只有第一条生效，
+            // 其余会被当成未知属性忽略。雨课堂的 csrftoken 常排在 sessionid 前面，
+            // 整串传过去往往只铺了 csrftoken，答题页仍然要求登录。
+            foreach (var part in raw.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var pair = part.Trim();
+                if (pair.Length == 0 || !pair.Contains('=')) continue;
+                cm.SetCookie("https://changjiang-exam.yuketang.cn", pair);
+            }
             cm.Flush();
         }
         catch (Exception)

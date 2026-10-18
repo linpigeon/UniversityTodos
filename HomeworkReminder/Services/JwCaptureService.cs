@@ -195,27 +195,58 @@ public static class JwCaptureService
     }
 
     /// <summary>
-    /// 注入/更新悬浮球（<b>同步返回</b>当前点击标志）。
+    /// 创建悬浮球（不存在时）并绑定点击监听的 JS 片段。
     /// <para>
     /// 点击时先自行把文案改成「正在获取课表…」再置标志——即时反馈，
     /// 不必等 C# 侧下一轮轮询才发现被点了。
     /// </para>
+    /// <para>
+    /// <b>不在这里读/清点击标志</b>：创建与探测是两件事。点击标志的消费必须只有一处
+    /// （<see cref="BuildProbeScript"/>），否则每轮注入都会把「已点击」重新置位或提前清掉。
+    /// </para>
     /// </summary>
-    internal static string BuildInjectScript(string label) =>
-        "(() => {" +
-        $"var ID={JsonStr(BallId)}, FLAG={JsonStr(ClickFlag)};" +
-        "var b=document.getElementById(ID);" +
-        "if(!b){b=document.createElement('button');b.id=ID;b.type='button';" +
+    private static string CreateBallJs(string label) =>
+        "b=document.createElement('button');b.id=ID;b.type='button';" +
         "Object.assign(b.style,{position:'fixed',right:'20px',bottom:'24px',zIndex:'2147483647'," +
         "maxWidth:'340px',padding:'10px 16px',borderRadius:'999px',border:'1px solid #2564CF'," +
         "background:'#2564CF',color:'#fff',fontSize:'13px',lineHeight:'1.4'," +
         "boxShadow:'0 4px 12px rgba(0,0,0,0.25)',cursor:'pointer',whiteSpace:'normal',textAlign:'left'});" +
         "(document.body||document.documentElement).appendChild(b);" +
-        $"b.addEventListener('click',function(){{window[FLAG]=true;b.textContent={JsonStr(BusyLabel)};}});" +
-        "}" +
         $"b.textContent={JsonStr(label)};" +
-        $"if(window[FLAG]!==true){{window[FLAG]=false;}}" +
+        $"b.addEventListener('click',function(){{window[FLAG]=true;b.textContent={JsonStr(BusyLabel)};}});";
+
+    /// <summary>
+    /// 注入（创建或复用）悬浮球并设置文案；<b>只读取、不消费</b>点击标志。
+    /// <para>用于「设置文案」这类显式调用（含首次注入）。轮询请用 <see cref="BuildProbeScript"/>。</para>
+    /// </summary>
+    internal static string BuildInjectScript(string label) =>
+        "(() => {" +
+        $"var ID={JsonStr(BallId)}, FLAG={JsonStr(ClickFlag)};" +
+        "var b=document.getElementById(ID);" +
+        $"if(!b){{{CreateBallJs(label)}}}" +
+        $"b.textContent={JsonStr(label)};" +
         "return String(window[FLAG]);})()";
+
+    /// <summary>
+    /// 探测一次点击并**消费**标志（读后立即清零），同时保证球体存在、但不重置文案。
+    /// <para>
+    /// 为什么必须消费：原先的探测脚本只做 <c>if(window[FLAG]!==true){window[FLAG]=false;}</c>，
+    /// 点击后标志永远保持 true，轮询每秒都把它当成一次新点击 —— 表现为点一次按钮后
+    /// 每秒重复抓取并导入课表，直到关闭窗口。这里改成「读即清零」，一次点击只处理一次。
+    /// </para>
+    /// <para>
+    /// 也不能像原先那样每轮 <c>b.textContent=默认文案</c>：那会把上一轮的结果文案
+    /// 在 1 秒内重置掉。文本只在创建球体或显式调用 <see cref="SetLabelAsync"/> 时改变。
+    /// </para>
+    /// </summary>
+    internal static string BuildProbeScript() =>
+        "(() => {" +
+        $"var ID={JsonStr(BallId)}, FLAG={JsonStr(ClickFlag)};" +
+        "var b=document.getElementById(ID);" +
+        $"if(!b){{{CreateBallJs(DefaultLabel)}}}" +
+        "var clicked=window[FLAG]===true;" +
+        "window[FLAG]=false;" +
+        "return String(clicked);})()";
 
     /// <summary>点击后的即时文案。</summary>
     private const string BusyLabel = "正在获取课表…";
@@ -275,6 +306,8 @@ public static class JwCaptureService
             }
 
             linkCts.Cancel();
+            // 取消后不再 await 它：必须观察，否则会在 GC 时变成未观察的取消异常。
+            timeout.Observe();
             // await 原任务：异常在这里被观察并收敛，不留未观察异常。
             // 同步抛错（适配器已销毁）也会被下面的 catch 接住。
             return UnwrapScriptResult(await task.ConfigureAwait(true));
@@ -350,11 +383,11 @@ public static class JwCaptureService
 
     /// <summary>探测一次「悬浮球是否被点击」（内嵌 WebView）。首次调用会创建球体。</summary>
     public static async Task<bool> WasClickedAsync(NativeWebView webView, CancellationToken ct = default) =>
-        Normalize(await InjectBallAsync(webView, null, ct).ConfigureAwait(true)) == "true";
+        Normalize(await TryEvalAsync(webView, BuildProbeScript(), ct).ConfigureAwait(true)) == "true";
 
     /// <summary>探测一次「悬浮球是否被点击」（独立弹窗）。首次调用会创建球体。</summary>
     public static async Task<bool> WasClickedAsync(NativeWebDialog dialog, CancellationToken ct = default) =>
-        Normalize(await InjectBallAsync(dialog, null, ct).ConfigureAwait(true)) == "true";
+        Normalize(await TryEvalAsync(dialog, BuildProbeScript(), ct).ConfigureAwait(true)) == "true";
 
     /// <summary>
     /// 注入（创建或复用）悬浮球，并返回当前点击标志。
@@ -517,7 +550,7 @@ public static class JwCaptureService
         }
 
         public async Task<bool> WasClickedAsync(CancellationToken ct) =>
-            Normalize(await EvalAsync(BuildInjectScript(DefaultLabel), ct).ConfigureAwait(true)) == "true";
+            Normalize(await EvalAsync(BuildProbeScript(), ct).ConfigureAwait(true)) == "true";
 
         public async Task SetLabelAsync(string label, CancellationToken ct) =>
             await EvalAsync(BuildLabelScript(label), ct).ConfigureAwait(true);

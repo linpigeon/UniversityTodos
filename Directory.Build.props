@@ -16,6 +16,31 @@
     改版本号时只改这一处；发布脚本会校验它与 tag 是否一致。
   -->
   <PropertyGroup>
-    <Version>1.4.2</Version>
+    <Version>1.4.3</Version>
+    <!--
+      用户可见的产品名（exe 属性对话框、任务管理器描述等）。
+      程序集名/命名空间仍是 HomeworkReminder：改它们会连带 avares:// 资源 URI、
+      更新包的 entry 名与用户数据目录，风险远大于收益。
+    -->
+    <Product>大学事项综合待办</Product>
+    <AssemblyTitle>大学事项综合待办</AssemblyTitle>
+  </PropertyGroup>
+
+  <!--
+    还原目录固定在仓库内。
+
+    为什么需要它（本机实测踩到）：用户级环境变量 NUGET_PACKAGES=D:\DevCache\nuget
+    只缓存了 3 个包（avalonia / buildservices / controls.webview），而仓库
+    .nuget-packages 有完整的 101 个离线包。环境变量的优先级**高于** NuGet.Config 里的
+    globalPackagesFolder，于是只有 tools/build.ps1（显式设了 NUGET_PACKAGES）能构建，
+    VS Code 的 C# 扩展或直接 dotnet build 会以
+    「NU1101: 找不到包 Avalonia.Desktop」失败。
+
+    RestorePackagesPath 是 MSBuild 属性，优先级高于环境变量与 NuGet.Config，
+    让 IDE、CLI、脚本都还原到同一份完整缓存。联网机器上即使删掉 .nuget-packages
+    也没关系：还原会照常下载到该目录（NuGet.Config 里也留了在线源的说明）。
+  -->
+  <PropertyGroup>
+    <RestorePackagesPath>$(MSBuildThisFileDirectory).nuget-packages</RestorePackagesPath>
   </PropertyGroup>
 </Project>

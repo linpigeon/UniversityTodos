@@ -61,11 +61,19 @@ public static class Timetable
         DefaultPeriods.Select(s => new PeriodSlot { Period = s.Period, StartTime = s.StartTime, EndTime = s.EndTime }).ToList();
 
     /// <summary>时间格式：<c>HH:mm</c>（24 小时制）。</summary>
-    public static bool IsValidTime(string? value) =>
-        value is { Length: 5 } && value[2] == ':'
-        && value[0] is >= '0' and <= '2' && char.IsAsciiDigit(value[1])
-        && char.IsAsciiDigit(value[3]) && char.IsAsciiDigit(value[4])
-        && string.CompareOrdinal(value, "24:00") < 0;
+    public static bool IsValidTime(string? value)
+    {
+        if (value is not { Length: 5 } || value[2] != ':') return false;
+        if (!char.IsAsciiDigit(value[0]) || !char.IsAsciiDigit(value[1])) return false;
+        if (!char.IsAsciiDigit(value[3]) || !char.IsAsciiDigit(value[4])) return false;
+
+        // 必须逐位判范围。原先只比较字符串大小（value &lt; "24:00"），
+        // 于是 "23:99"、"08:60" 都能通过：节次表会存进不可能的时间，
+        // 而 TryParseClock 把它滚成次日 00:39，上课提醒的时间就错了。
+        var hour = (value[0] - '0') * 10 + (value[1] - '0');
+        var minute = (value[3] - '0') * 10 + (value[4] - '0');
+        return hour < 24 && minute < 60;
+    }
 
     /// <summary>该节是否停用（开始与结束均为 <c>00:00</c>）。</summary>
     public static bool IsPeriodDisabled(PeriodSlot slot) =>
@@ -195,6 +203,20 @@ public static class Timetable
         var start = MondayOf(monday.Value);
         return Enumerable.Range(0, count).Select(i => start.AddDays(i).ToString("yyyy-MM-dd")).ToList();
     }
+
+    /// <summary>
+    /// 按学期筛条目。
+    /// <para>
+    /// <paramref name="term"/> 为 0（未配置/旧数据）时**不过滤**；条目自身 <c>Term</c> 为 0
+    /// （早期版本导入、没写学期）时也保留——宁可多显示，也不能把用户的课全藏起来。
+    /// </para>
+    /// <para>
+    /// 为什么要 filter：<see cref="ScheduleMerge"/> 刻意「绝不删除」，换学期重新导入后
+    /// 旧学期课程仍留在 schedule.json；不筛就会在新学期按新日期显示，甚至继续发上课提醒。
+    /// </para>
+    /// </summary>
+    public static List<ScheduleItem> ForTerm(IEnumerable<ScheduleItem> items, int term) =>
+        term == 0 ? items.ToList() : items.Where(i => i.Term == 0 || i.Term == term).ToList();
 
     /// <summary>
     /// 按周次 / 单双周 / 学期过滤条目。

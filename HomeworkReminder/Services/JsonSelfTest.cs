@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Net;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -134,6 +135,62 @@ public static class JsonSelfTest
                 "已读请求体字段名不符: " + markAll);
         });
 
+        // ---- 传输层降级：空 body / 非 JSON / 401 / 403 ----
+
+        Check("传输层：空 body 与非 JSON 降级为空列表", () =>
+        {
+            // 回归：原先「没有数据」返回 default(JsonElement)，消费方 TryGetProperty/Deserialize
+            // 会抛 InvalidOperationException，而外层只 catch YktApiException → 整次同步失败。
+            using var empty = YktClientWith((_, _) => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(string.Empty),
+            });
+            Assert(empty.GetCoursesAsync().GetAwaiter().GetResult().Count == 0,
+                "空 body 应降级为空列表，而不是抛异常");
+
+            using var nonJson = YktClientWith((_, _) => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("Objects does not exist."),
+            });
+            Assert(nonJson.GetCoursesAsync().GetAwaiter().GetResult().Count == 0,
+                "200 + 非 JSON 应降级为空列表，而不是抛 InvalidOperationException");
+        });
+
+        Check("传输层：只有 401 才算登录失效", () =>
+        {
+            using var forbidden = YktClientWith((_, _) => new HttpResponseMessage(HttpStatusCode.Forbidden)
+            {
+                Content = new StringContent("blocked"),
+            });
+            try
+            {
+                forbidden.GetCoursesAsync().GetAwaiter().GetResult();
+                Assert(false, "403 应抛出业务异常");
+            }
+            catch (YktAuthExpiredException)
+            {
+                Assert(false, "403 被误判成登录失效：会丢掉仍然有效的会话");
+            }
+            catch (YktApiException)
+            {
+                // 预期：403 是业务失败（缺 CSRF / 风控），不该清登录态。
+            }
+
+            using var unauthorized = YktClientWith((_, _) => new HttpResponseMessage(HttpStatusCode.Unauthorized)
+            {
+                Content = new StringContent("""{"errcode":401002}"""),
+            });
+            try
+            {
+                unauthorized.GetCoursesAsync().GetAwaiter().GetResult();
+                Assert(false, "401 应抛登录失效");
+            }
+            catch (YktAuthExpiredException)
+            {
+                // 预期。
+            }
+        });
+
         // ---- 本地持久化：走真实 Store（含 DPAPI 信封），落盘到临时目录 ----
 
         var tempDir = Path.Combine(Path.GetTempPath(), "hw-jsoncheck-" + Guid.NewGuid().ToString("N"));
@@ -166,10 +223,13 @@ public static class JsonSelfTest
                 {
                     Done = ["a", "b"],
                     ReadAnnouncements = ["c"],
+                    Starred = ["s1"],
+                    InMyDay = ["m1"],
                 }).GetAwaiter().GetResult();
                 var loaded = store.LoadAsync().GetAwaiter().GetResult();
-                Assert(loaded.Done.SetEquals(["a", "b"]) && loaded.ReadAnnouncements.SetEquals(["c"]),
-                    "本地状态往返不符");
+                Assert(loaded.Done.SetEquals(["a", "b"]) && loaded.ReadAnnouncements.SetEquals(["c"])
+                       && loaded.Starred.SetEquals(["s1"]) && loaded.InMyDay.SetEquals(["m1"]),
+                    "本地状态往返不符（勾选/已读/星标/我的一天）");
             });
 
             Check("TodoCacheStore 往返与校验", () =>
@@ -231,6 +291,30 @@ public static class JsonSelfTest
 
                 store.ClearAsync().GetAwaiter().GetResult();
                 Assert(store.LoadAsync().GetAwaiter().GetResult() is null, "缓存清除后应读不到");
+            });
+
+            Check("冷启动缓存三路合并按 Id 去重", () =>
+            {
+                // 回归：v1.4.2 及更早把学习通/批改网条目同时写进 Homework 与 Chaoxing/Pigai，
+                // 冷启动三段拼接后首屏每条出现两份。写入侧已改，这里兜旧缓存。
+                var item = new TodoItem
+                {
+                    Id = "hw-cx-work-1",
+                    Kind = TodoKind.Homework,
+                    Title = "学习通作业",
+                    CourseName = "课程A",
+                    DeadlineAnchor = DateTimeOffset.Now,
+                    RemainingAtSync = TimeSpan.FromDays(1),
+                };
+                var cache = new TodoCacheFile
+                {
+                    Homework = [item],
+                    Chaoxing = [item],
+                    Pigai = [],
+                };
+                var merged = MainViewModel.MergeCachedHomework(cache);
+                Assert(merged.Count == 1 && merged[0].Id == item.Id,
+                    $"三路合并应按 Id 去重，实际 {merged.Count} 条");
             });
 
             Check("学习通条目缓存往返（相对时间还原）", () =>
@@ -589,6 +673,10 @@ public static class JsonSelfTest
                 Assert(UpdateService.ChoosePackage(release, "测试源", """{"file":"不存在.zip"}""")
                         ?.Asset.Name == "HomeworkReminder-v9.9.9-win-x64.zip",
                     "清单文件不存在时应按平台特征兜底挑包");
+                // 同时必须丢弃这份清单：它的哈希描述的是另一个文件，挂着它兜底包必然校验失败
+                Assert(UpdateService.ChoosePackage(release, "测试源", """{"file":"不存在.zip"}""")
+                        ?.Manifest is null,
+                    "清单点名了不存在的文件时应丢弃清单，否则兜底包哈希必然不符");
 
                 // 清单 JSON 坏掉 → 同样兜底，不应抛异常
                 Assert(UpdateService.ChoosePackage(release, "测试源", "{ 这不是 JSON")
@@ -612,6 +700,33 @@ public static class JsonSelfTest
 
                 Assert(UpdateService.ChoosePackage(new ReleaseInfo { TagName = "v9.9.9", Assets = [] }, "测试源", null) is null,
                     "无资产时应返回 null");
+
+                // ---- 同版本多源：两个源都要参与，下载失败才换得过去 ----
+                var github = new ReleaseInfo
+                {
+                    TagName = "v9.9.9",
+                    Assets = [new ReleaseAsset { Name = "HomeworkReminder-v9.9.9-win-x64.zip", Size = 2 }],
+                    ManifestJson = manifestJson,
+                };
+                var gitea = new ReleaseInfo
+                {
+                    TagName = "v9.9.9",
+                    Assets = [new ReleaseAsset { Name = "HomeworkReminder-v9.9.9-win-x64.zip", Size = 2 }],
+                    ManifestFetchFailed = true,
+                };
+                var outcome = new UpdateService.Outcome(
+                [
+                    new UpdateService.SourceResult("GitHub", github, null),
+                    new UpdateService.SourceResult("Gitea", gitea, null),
+                ]);
+                var choices = UpdateService.ChoosePackages(outcome, "v9.9.9");
+                Assert(choices.Count == 2, $"两个源同版本都应参与挑包，实际 {choices.Count}");
+                Assert(choices[0].Source == "GitHub" && choices[0].Manifest is not null,
+                    "清单可用的源应排在前面");
+                Assert(choices[1].Source == "Gitea" && choices[1].ManifestFetchFailed,
+                    "清单拉取失败的源应排后面，并保留失败标记供文案使用");
+                Assert(UpdateService.ChoosePackages(outcome, "v9.9.8").Count == 0,
+                    "tag 不同时不应挑到包");
 
                 // ---- SHA256：用已知内容的固定期望值确认算法与编码 ----
                 var probe = Path.Combine(Path.GetTempPath(), $"hr-sha-{Guid.NewGuid():N}.bin");
@@ -809,6 +924,63 @@ public static class JsonSelfTest
             Assert(r.CourseCount == 1, $"在册+归档重复时应只同步一次，实际 {r.CourseCount} 门");
             // 归档的 200 是别的学期，不进本次统计
             Assert(r.ArchivedCourses == 0, $"非当前学期的归档课不应计入：{r.ArchivedCourses}");
+        });
+
+        Check("单课日志失败时保留缓存作业（不清空该课）", () =>
+        {
+            // 回归：一次超时/500 曾让该课作业从列表和 todos.json 一起消失。
+            var logs = new Dictionary<long, List<YktActivity>>
+            {
+                [100] = [HwActivity(1, 1001, "课程A作业")],
+                [200] = [HwActivity(2, 2002, "课程B作业")],
+            };
+            var first = new SyncService(new FakeYktApi(
+                [Course(100, "课程A"), Course(200, "课程B")], logs))
+                .SyncAsync(null).GetAwaiter().GetResult();
+            Assert(first.HomeworkForCache.Count == 2, "前置：首次同步应缓存两门课的作业");
+
+            var cache = CacheOf(first);
+            var failing = new FakeYktApi([Course(100, "课程A"), Course(200, "课程B")], logs)
+            {
+                FailLogs = [200],
+            };
+            var second = new SyncService(failing).SyncAsync(cache).GetAwaiter().GetResult();
+
+            Assert(second.Homework.Any(h => h.Id == "hw-200-2002"),
+                "读不到日志的课程应保留缓存里的作业，而不是从列表消失");
+            Assert(second.HomeworkForCache.Any(h => h.Id == "hw-200-2002"),
+                "缓存也要保留该课作业；整体覆盖会让它从冷启动列表里消失");
+            Assert(second.Warnings.Count > 0, "降级应留下警告");
+        });
+
+        Check("本学期 0 门课不清空缓存", () =>
+        {
+            var logs = new Dictionary<long, List<YktActivity>>
+            {
+                [100] = [HwActivity(1, 1001, "课程A作业")],
+            };
+            var first = new SyncService(new FakeYktApi([Course(100, "课程A")], logs))
+                .SyncAsync(null).GetAwaiter().GetResult();
+            var cache = CacheOf(first);
+
+            var empty = new SyncService(new FakeYktApi([], logs)).SyncAsync(cache).GetAwaiter().GetResult();
+            Assert(empty.Homework.Count == 1 && empty.HomeworkForCache.Count == 1,
+                $"接口返回 0 门课时应保留上一轮待办，实际 Homework={empty.Homework.Count}");
+            Assert(empty.Warnings.Count > 0, "应提示没有找到课程");
+        });
+
+        Check("章节树失败不记录全量时间戳", () =>
+        {
+            // 试卷类作业的截止时间只来自章节树；记了时间戳就会 24h 不再重试。
+            var api = new FakeYktApi(
+                [Course(100, "课程A")],
+                new Dictionary<long, List<YktActivity>> { [100] = [HwActivity(1, 1001, "作业")] })
+            {
+                FailChapters = true,
+            };
+            var r = new SyncService(api).SyncAsync(null).GetAwaiter().GetResult();
+            Assert(!r.CourseFullSyncedAt.ContainsKey(100),
+                "章节树读取失败时不应记录全量校验时间戳（否则 24h 内不会再拉树）");
         });
 
         Check("issue#1 已读公告不被默认过滤", () =>
@@ -1102,6 +1274,51 @@ public static class JsonSelfTest
             Assert(week2.Count == 1 && week2[0].Name == "高数", "按周过滤（每周）不符");
             Assert(Timetable.FilterForWeek(odd, 2, 1).Count == 0, "第 2 周不应有单周课");
             Assert(Timetable.FilterForWeek(odd, 3, 1).Count == 1, "第 3 周应有单周课");
+
+            // 学期过滤：合并导入从不删除，换学期后旧条目仍在文件里，必须按学期筛掉；
+            // Term=0 是早期导入的数据，得保留（否则老用户课表瞬间全空）。
+            var mixed = new List<ScheduleItem>
+            {
+                new() { Id = "cur", Name = "本学期", Weekday = 1, StartPeriod = 1, EndPeriod = 2,
+                        StartWeek = 1, EndWeek = 16, StartTime = "08:00", EndTime = "09:40", Term = 202601 },
+                new() { Id = "old", Name = "旧学期", Weekday = 1, StartPeriod = 3, EndPeriod = 4,
+                        StartWeek = 1, EndWeek = 16, StartTime = "10:00", EndTime = "11:40", Term = 202501 },
+                new() { Id = "legacy", Name = "旧数据", Weekday = 2, StartPeriod = 1, EndPeriod = 2,
+                        StartWeek = 1, EndWeek = 16, StartTime = "08:00", EndTime = "09:40", Term = 0 },
+            };
+            var forTerm = Timetable.ForTerm(mixed, 202601);
+            Assert(forTerm.Any(i => i.Id == "cur") && forTerm.Any(i => i.Id == "legacy")
+                   && forTerm.All(i => i.Id != "old"),
+                "学期过滤应保留本学期与 Term=0 的旧数据、排除旧学期");
+            Assert(Timetable.ForTerm(mixed, 0).Count == 3, "未配置学期（0）时应不过滤");
+
+            // 时间校验：必须逐位判范围，不能只比字符串大小。
+            Assert(Timetable.IsValidTime("00:00") && Timetable.IsValidTime("23:59"),
+                "合法时间应通过");
+            Assert(!Timetable.IsValidTime("24:00") && !Timetable.IsValidTime("23:60")
+                   && !Timetable.IsValidTime("08:99") && !Timetable.IsValidTime("9:00"),
+                "不可能的分钟/小时应被拒绝（否则提醒时间会被滚到次日）");
+        });
+
+        Check("HTML 实体：代理项不抛异常", () =>
+        {
+            // 页面若把 emoji 拆成代理项实体（&#55357; / &#xD83D;），
+            // ConvertFromUtf32 会抛 ArgumentOutOfRangeException，整个导入失败。
+            Assert(ZhengfangHtml.DecodeEntities("&#55357;") == "&#55357;",
+                "十进制代理项实体应原样保留");
+            Assert(ZhengfangHtml.DecodeEntities("&#xD83D;") == "&#xD83D;",
+                "十六进制代理项实体应原样保留");
+            Assert(ZhengfangHtml.DecodeEntities("&#x1F600;") == "\U0001F600",
+                "合法的增补平面字符仍应正常解码");
+        });
+
+        Check("批改网截止时间：多空白也能解析", () =>
+        {
+            var due = PigaiApiClient.ParseDue("2026-12-06  23:59");
+            Assert(due == new DateTimeOffset(2026, 12, 6, 23, 59, 0, TimeSpan.FromHours(8)),
+                $"双空格的截止时间应能解析，实际 {due?.ToString() ?? "(null)"}");
+            Assert(PigaiApiClient.ParseDue("2026-12-06 23:59") is not null, "单空格仍应能解析");
+            Assert(PigaiApiClient.ParseDue("不是时间") is null, "无效文本应返回 null");
         });
 
         Check("课表：真实页面误判防护（课程代码/学时/合并单元格）", () =>
@@ -1164,6 +1381,15 @@ public static class JsonSelfTest
             var twoBlocks = ZhengfangParser.SplitCellBlocks(
                 rich + "\n大学英语BIII★\n(3-4节)1-16周\n珠海 明德楼小教A313\n莫飘");
             Assert(twoBlocks.Count == 2, $"两门课应切成 2 块，实际 {twoBlocks.Count}");
+            // 只断言块数不够：原先块数对、内容错（第二门被并进第一块，第二块只剩教师行），
+            // 结果第二门课整门丢失。这里固定块内内容。
+            Assert(twoBlocks[0].Count == 12 && twoBlocks[0][0].StartsWith("中国近现代史"),
+                $"第一块应恰好是第一门课的 12 行，实际 {twoBlocks[0].Count} 行：{string.Join(" | ", twoBlocks[0])}");
+            Assert(twoBlocks[1].Count == 4
+                   && twoBlocks[1][0] == "大学英语BIII★"
+                   && twoBlocks[1][1] == "(3-4节)1-16周"
+                   && twoBlocks[1][2] == "珠海 明德楼小教A313",
+                $"第二门课的课名/周次/地点被并进了第一块：{string.Join(" | ", twoBlocks[1])}");
 
             // ---- Bug 5：rowspan 必须展开 ----
             // 真实课表用 rowspan 做布局（「上午」占两行、节次合并）；
@@ -1911,6 +2137,338 @@ public static class JsonSelfTest
             Assert(service.CheckOnce() == 1, "重置「已提醒」后应能再次提醒");
         });
 
+        Check("上课提醒：旧学期课程不再提醒", () =>
+        {
+            var termStart = "2026-09-07";
+            var periods = new List<PeriodSlot>
+            {
+                new() { Period = 1, StartTime = "10:00", EndTime = "10:45" },
+            };
+            var file = new ScheduleFile
+            {
+                Periods = periods,
+                Items =
+                [
+                    new() { Id = "old-term", Name = "旧学期课", Weekday = 1, StartPeriod = 1, EndPeriod = 1,
+                            StartWeek = 1, EndWeek = 16, Term = 202501,
+                            StartTime = "10:00", EndTime = "10:45" },
+                ],
+            };
+            var sink = new List<AppNotification>();
+            var now = new DateTime(2026, 9, 7, 9, 50, 0);
+            var svc = new ClassReminderService(
+                () => file, () => termStart, () => 15, new RecordingNotifier(sink),
+                log: null, now: () => now, term: () => 202601);
+
+            Assert(svc.CheckOnce() == 0 && sink.Count == 0, "旧学期课程不应再发上课提醒");
+
+            file.Items[0].Term = 202601;
+            Assert(svc.CheckOnce() == 1, "本学期课程仍应正常提醒");
+        });
+
+        Check("课表 CSV 导入：表头 / 引号 / 坏行 / 时间推导", () =>
+        {
+            var periods = Timetable.CreateDefaultPeriods();
+            const string csv = """
+                课程名,教师,地点,星期,起始节,结束节,起始周,结束周,单双周,开始时间,结束时间
+                高等数学,张三,教一101,周一,1,2,1,16,每周,,
+                "数据结构,进阶",李四,信息楼,周三,3,4,4,8,单周,10:00,10:45
+                坏行,只,有,三列
+                """;
+
+            var rows = ScheduleImport.Parse(csv, 202601, periods);
+            Assert(rows.Count == 3, $"应解析出 3 行，实际 {rows.Count}");
+
+            Assert(rows[0].Item is { Name: "高等数学", Weekday: 1, StartTime: "08:00", EndTime: "09:40" },
+                $"留空时间应按节次表推导：{rows[0].Item?.StartTime}-{rows[0].Item?.EndTime}");
+
+            Assert(rows[1].Item is { Name: "数据结构,进阶", WeekParity: WeekParity.Odd, StartTime: "10:00" },
+                "带引号的逗号字段/单双周/显式时间应正确解析");
+
+            Assert(rows[2].Item is null && rows[2].Error is not null, "列数不足的行应给出错误");
+
+            Assert(ScheduleImport.NormalizeTime("8:00") == "08:00"
+                   && ScheduleImport.NormalizeTime("23:60") is null,
+                "时间规范化不符");
+        });
+
+        Check("截止提醒：窗口 / 改期 / 补发 / 显式提醒", () =>
+        {
+            var now = new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.FromHours(8));
+            var homework = new TodoItem
+            {
+                Id = "hw-100-1001",
+                Kind = TodoKind.Homework,
+                Title = "实验报告",
+                DueAt = now.AddMinutes(30),
+            };
+
+            var none = new HashSet<string>();
+            var hits = ReminderRules.Evaluate([homework], now, 60, none, none, null);
+            Assert(hits.Count == 1 && hits[0].Kind == ReminderKind.DueSoon && hits[0].MinutesUntil == 30,
+                $"应命中临近截止，实际 {hits.Count} 条");
+
+            // 窗口外（还有 90 分钟，提前量 60）
+            var far = new TodoItem
+            {
+                Id = "hw-100-1002", Kind = TodoKind.Homework, Title = "远期", DueAt = now.AddMinutes(90),
+            };
+            Assert(ReminderRules.Evaluate([far], now, 60, none, none, null).Count == 0, "窗口外不应提醒");
+
+            // 已提醒过同一个截止时刻
+            var key = ReminderRules.DueKey(homework, homework.DueAt!.Value);
+            Assert(ReminderRules.Evaluate([homework], now, 60, new HashSet<string> { key }, none, null).Count == 0,
+                "同一截止时刻不应重复提醒");
+
+            // 改期 → 新的截止键 → 重新提醒
+            homework.DueAt = now.AddMinutes(40);
+            Assert(ReminderRules.Evaluate([homework], now, 60, new HashSet<string> { key }, none, null).Count == 1,
+                "改期后应重新提醒");
+
+            // 休眠补发：错过 5 分钟可补，错过 40 分钟不补
+            var justPassed = new TodoItem
+            {
+                Id = "hw-100-1003", Kind = TodoKind.Homework, Title = "刚过", DueAt = now.AddMinutes(-5),
+            };
+            Assert(ReminderRules.Evaluate([justPassed], now, 60, none, none, now.AddMinutes(-40)).Count == 1,
+                "休眠恢复后 30 分钟内的截止应补发");
+            var longPassed = new TodoItem
+            {
+                Id = "hw-100-1004", Kind = TodoKind.Homework, Title = "久过", DueAt = now.AddMinutes(-40),
+            };
+            Assert(ReminderRules.Evaluate([longPassed], now, 60, none, none, now.AddMinutes(-90)).Count == 0,
+                "超过 30 分钟的错过不应补发");
+
+            // 显式提醒覆盖默认截止提醒
+            var manual = new TodoItem
+            {
+                Id = "man-1", Kind = TodoKind.Custom, Title = "打印", DueAt = now.AddMinutes(30),
+                RemindAt = now.AddMinutes(-1),
+            };
+            var explicitHits = ReminderRules.Evaluate([manual], now, 60, none, none, null);
+            Assert(explicitHits.Count == 1 && explicitHits[0].Kind == ReminderKind.Explicit,
+                $"显式提醒应覆盖默认截止提醒，实际 {explicitHits.Count} 条");
+            var explicitKey = ReminderRules.ExplicitKey(manual, manual.RemindAt!.Value);
+            Assert(ReminderRules.Evaluate([manual], now, 60, none, new HashSet<string> { explicitKey }, null).Count == 0,
+                "显式提醒发过不应重复");
+
+            // 关闭临近截止（提前量 0）不应连带关掉显式提醒
+            var off = ReminderRules.Evaluate([manual], now, 0, none, none, null);
+            Assert(off.Count == 1 && off[0].Kind == ReminderKind.Explicit,
+                "关闭临近截止不应连带关掉显式提醒");
+
+            // 已完成 / 公告不参与提醒
+            var done = new TodoItem
+            {
+                Id = "hw-100-1005", Kind = TodoKind.Homework, Title = "已完成",
+                DueAt = now.AddMinutes(10), Status = TodoStatus.Completed,
+            };
+            var ann = new TodoItem
+            {
+                Id = "ann-100-1", Kind = TodoKind.Announcement, Title = "公告",
+                DueAt = now.AddMinutes(10),
+            };
+            Assert(ReminderRules.Evaluate([done, ann], now, 60, none, none, null).Count == 0,
+                "已完成与公告不应提醒");
+        });
+
+        Check("逾期汇总：过点才发、每天一次、只统计未完成", () =>
+        {
+            var now = new DateTimeOffset(2026, 10, 20, 9, 0, 0, TimeSpan.FromHours(8));
+            Assert(ReminderRules.IsDigestDue(now, "08:00", null), "过点后应可发");
+            Assert(!ReminderRules.IsDigestDue(now, "10:00", null), "未到点不应发");
+            Assert(!ReminderRules.IsDigestDue(now, "08:00", "2026-10-20"), "当天已发过不应重复");
+            Assert(ReminderRules.IsDigestDue(now, "25:00", null), "非法时刻应按默认 08:00 处理");
+
+            var late = new TodoItem
+            {
+                Id = "hw-1-1", Kind = TodoKind.Homework, Title = "逾期", DueAt = now.AddMinutes(-1),
+            };
+            var done = new TodoItem
+            {
+                Id = "hw-1-2", Kind = TodoKind.Homework, Title = "已完成",
+                DueAt = now.AddMinutes(-1), Status = TodoStatus.Completed,
+            };
+            var manual = new TodoItem
+            {
+                Id = "man-1", Kind = TodoKind.Custom, Title = "自建逾期", DueAt = now.AddMinutes(-2),
+            };
+            var overdue = ReminderRules.Overdue([late, done, manual], now);
+            Assert(overdue.Count == 2 && overdue.All(i => i.Status != TodoStatus.Completed),
+                $"逾期统计应排除已完成，实际 {overdue.Count}");
+        });
+
+        Check("自建待办存储：往返与清洗", () =>
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "hw-manual-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var store = new ManualTodoStore(dir);
+                var good = new TodoItem
+                {
+                    Id = "man-1", Kind = TodoKind.Custom, Title = "打印报告",
+                    Priority = TodoPriority.High, DueAt = DateTimeOffset.Now.AddDays(1),
+                    Tags = ["实验", " 实验 ", ""],
+                };
+                var badKind = new TodoItem { Id = "hw-1-1", Kind = TodoKind.Homework, Title = "平台作业" };
+                var badId = new TodoItem { Id = "custom-1", Kind = TodoKind.Custom, Title = "坏 id" };
+                var noTitle = new TodoItem { Id = "man-2", Kind = TodoKind.Custom, Title = "  " };
+
+                store.SaveAsync([good, badKind, badId, noTitle]).GetAwaiter().GetResult();
+                var loaded = store.LoadAsync().GetAwaiter().GetResult();
+                Assert(loaded.Count == 1 && loaded[0].Id == "man-1",
+                    $"应只保留合法自建事项，实际 {loaded.Count} 条");
+                Assert(loaded[0].Tags.Count == 1 && loaded[0].Tags[0] == "实验", "标签应去空白/去重");
+                Assert(loaded[0].Priority == TodoPriority.High, "优先级应往返");
+            }
+            finally
+            {
+                try { Directory.Delete(dir, recursive: true); } catch { /* 清理失败不影响断言 */ }
+            }
+        });
+
+        Check("数据备份：导出与恢复", () =>
+        {
+            var dataDir = Path.Combine(Path.GetTempPath(), "hw-backup-" + Guid.NewGuid().ToString("N"));
+            var restoreDir = Path.Combine(Path.GetTempPath(), "hw-restore-" + Guid.NewGuid().ToString("N"));
+            var zip = Path.Combine(Path.GetTempPath(), "hw-backup-" + Guid.NewGuid().ToString("N") + ".zip");
+            try
+            {
+                Directory.CreateDirectory(dataDir);
+                File.WriteAllText(Path.Combine(dataDir, "settings.json"), """{"Term":202601}""");
+                File.WriteAllText(Path.Combine(dataDir, "manual-todos.json"), """{"Items":[]}""");
+                File.WriteAllText(Path.Combine(dataDir, "startup.log"), "日志不应进备份");
+
+                var count = DataBackupService.CreateBackup(dataDir, zip);
+                Assert(count == 2, $"应只备份白名单内的 2 个文件，实际 {count}");
+
+                Directory.CreateDirectory(restoreDir);
+                var restored = DataBackupService.RestoreBackup(zip, restoreDir);
+                Assert(restored == 2, $"应恢复 2 个文件，实际 {restored}");
+                Assert(File.ReadAllText(Path.Combine(restoreDir, "settings.json")).Contains("202601"),
+                    "恢复后的设置内容不符");
+                Assert(!File.Exists(Path.Combine(restoreDir, "startup.log")),
+                    "日志文件不应进入备份/恢复");
+            }
+            finally
+            {
+                try { Directory.Delete(dataDir, recursive: true); } catch { }
+                try { Directory.Delete(restoreDir, recursive: true); } catch { }
+                try { File.Delete(zip); } catch { }
+            }
+        });
+
+        Check("截止提醒服务：发送 / 去重 / 重启后不重复", () =>
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "hw-reminder-" + Guid.NewGuid().ToString("N"));
+            var now = new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.FromHours(8));
+            var item = new TodoItem
+            {
+                Id = "hw-1-1", Kind = TodoKind.Homework, Title = "实验报告",
+                CourseName = "大学物理", DueAt = now.AddMinutes(30),
+            };
+            var sink = new List<AppNotification>();
+            try
+            {
+                var store = new ReminderStateStore(dir);
+                var svc = new ReminderService(
+                    () => [item], new RecordingNotifier(sink), store, now: () => now);
+
+                Assert(svc.CheckOnceAsync().GetAwaiter().GetResult() == 1 && sink.Count == 1,
+                    $"应发出 1 条临近截止提醒，实际 {sink.Count} 条");
+                Assert(sink[0].Body.Contains("实验报告"), "通知正文应为事项标题");
+
+                Assert(svc.CheckOnceAsync().GetAwaiter().GetResult() == 0 && sink.Count == 1,
+                    "同一进程内不应重复提醒");
+
+                // 用同一份状态文件新建服务，模拟重启。
+                var sink2 = new List<AppNotification>();
+                var svc2 = new ReminderService(
+                    () => [item], new RecordingNotifier(sink2), store, now: () => now);
+                Assert(svc2.CheckOnceAsync().GetAwaiter().GetResult() == 0 && sink2.Count == 0,
+                    "重启后不应重复提醒（状态应已落盘）");
+            }
+            finally
+            {
+                try { Directory.Delete(dir, recursive: true); } catch { /* 忽略 */ }
+            }
+        });
+
+        Check("数据版本：更高版本进入只读且拒绝覆盖", () =>
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "hw-schema-" + Guid.NewGuid().ToString("N"));
+            var path = Path.Combine(dir, "local-state.json");
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(path, """{"SchemaVersion":99,"Done":["a"]}""");
+            try
+            {
+                DataCompatibility.ResetForTests();
+                var store = new LocalStateStore(dir);
+                var loaded = store.LoadAsync().GetAwaiter().GetResult();
+                Assert(loaded.Done.Contains("a"), "更高版本的数据应仍可读取");
+                Assert(DataCompatibility.IsReadOnly, "见到更高版本后应进入只读");
+
+                store.SaveAsync(new LocalState { Done = ["b"] }).GetAwaiter().GetResult();
+                Assert(File.ReadAllText(path).Contains("\"a\""), "只读模式不得覆盖更高版本的数据");
+
+                // 复位后再保存应恢复正常（后续用例仍能写盘）。
+                DataCompatibility.ResetForTests();
+                store.SaveAsync(new LocalState { Done = ["c"] }).GetAwaiter().GetResult();
+                Assert(File.ReadAllText(path).Contains("\"c\""), "复位后应恢复可写");
+            }
+            finally
+            {
+                DataCompatibility.ResetForTests();
+                try { Directory.Delete(dir, recursive: true); } catch { /* 忽略 */ }
+            }
+        });
+
+        Check("提醒状态持久化往返", () =>
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "hw-remstate-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var store = new ReminderStateStore(dir);
+                store.SaveAsync(new ReminderState
+                {
+                    BaselineEstablished = true,
+                    RemindedDue = ["hw-1|1000"],
+                    RemindedExplicit = ["man-1|2000"],
+                    LastOverdueDigestDate = "2026-10-20",
+                    LastCheckUnixMs = 123456,
+                }).GetAwaiter().GetResult();
+
+                var loaded = store.LoadAsync().GetAwaiter().GetResult();
+                Assert(loaded.BaselineEstablished
+                       && loaded.RemindedDue.Contains("hw-1|1000")
+                       && loaded.RemindedExplicit.Contains("man-1|2000")
+                       && loaded.LastOverdueDigestDate == "2026-10-20"
+                       && loaded.LastCheckUnixMs == 123456,
+                    "提醒状态往返不符");
+            }
+            finally
+            {
+                try { Directory.Delete(dir, recursive: true); } catch { /* 忽略 */ }
+            }
+        });
+
+        Check("提醒设置：默认值与归一化", () =>
+        {
+            var defaults = new AppSettings();
+            Assert(defaults.NotifyDueSoon && defaults.NotifyOverdue,
+                "临近截止与逾期汇总默认应开启");
+            Assert(defaults.DueSoonMinutes == AppSettings.DefaultDueSoonMinutes,
+                "默认提前量不符");
+            Assert(AppSettings.NormalizeDueSoonMinutes(1) == AppSettings.MinDueSoonMinutes,
+                "过小的提前量应被夹到下限");
+            Assert(AppSettings.NormalizeDueSoonMinutes(99999) == AppSettings.MaxDueSoonMinutes,
+                "过大的提前量应被夹到上限");
+            Assert(AppSettings.IsValidDigestTime("08:00")
+                   && !AppSettings.IsValidDigestTime("24:00")
+                   && !AppSettings.IsValidDigestTime("08:60"),
+                "汇总时刻校验不符");
+        });
+
         Check("上课提醒：前提提示（有课表就不能说「还没有课表」）", () =>
         {
             // 回归：启动时课表是异步读盘的，而提示原先在启动读盘那条路径上**忘了刷新**，
@@ -2197,6 +2755,23 @@ public static class JsonSelfTest
         CourseFullSyncedAt = new Dictionary<long, DateTimeOffset>(r.CourseFullSyncedAt),
     };
 
+    /// <summary>用桩响应构造 <see cref="YktApiClient"/>（不触网），用于验证传输层降级。</summary>
+    private static YktApiClient YktClientWith(
+        Func<HttpRequestMessage, CancellationToken, HttpResponseMessage> respond)
+    {
+        var http = new HttpClient(new StubHandler(respond)) { Timeout = Timeout.InfiniteTimeSpan };
+        return new YktApiClient(new YktSession { SessionId = "test" }, http);
+    }
+
+    /// <summary>固定响应的 HTTP 处理器。</summary>
+    private sealed class StubHandler(Func<HttpRequestMessage, CancellationToken, HttpResponseMessage> respond)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(respond(request, cancellationToken));
+    }
+
     /// <summary>离线的 IYktApi：固定课程表 + 固定学习日志，进度/章节/详情为空。</summary>
     private sealed class FakeYktApi(
         IReadOnlyList<YktCourse> courses,
@@ -2215,11 +2790,21 @@ public static class JsonSelfTest
         /// <summary>归档班级，默认没有；需要覆盖归档合并路径的用例可以传入。</summary>
         public IReadOnlyList<YktCourse> Archived { get; init; } = [];
 
+        /// <summary>这些课堂的学习日志请求会失败（模拟超时 / 5xx）。</summary>
+        public IReadOnlyCollection<long> FailLogs { get; init; } = [];
+
+        /// <summary>为 true 时章节树请求失败。</summary>
+        public bool FailChapters { get; init; }
+
         public Task<IReadOnlyList<YktCourse>> GetArchivedCoursesAsync(CancellationToken ct = default)
             => Task.FromResult(Archived);
 
         public Task<IReadOnlyList<YktActivity>> GetLearnLogsAsync(long classroomId, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<YktActivity>>(logs.GetValueOrDefault(classroomId, []));
+        {
+            if (FailLogs.Contains(classroomId))
+                throw new YktApiException("模拟学习日志读取失败");
+            return Task.FromResult<IReadOnlyList<YktActivity>>(logs.GetValueOrDefault(classroomId, []));
+        }
 
         public Task<IReadOnlyDictionary<string, YktLeafProgress>> GetProgressAsync(long classroomId, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyDictionary<string, YktLeafProgress>>(new Dictionary<string, YktLeafProgress>());
@@ -2228,7 +2813,9 @@ public static class JsonSelfTest
             => Task.FromResult<YktLeafDetail?>(null);
 
         public Task<IReadOnlyList<YktChapter>> GetChaptersAsync(long classroomId, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<YktChapter>>([]);
+            => FailChapters
+                ? throw new YktApiException("模拟章节树读取失败")
+                : Task.FromResult<IReadOnlyList<YktChapter>>([]);
 
         public Task<int> GetUnreadCountAsync(CancellationToken ct = default) => Task.FromResult(0);
 

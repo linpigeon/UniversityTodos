@@ -27,6 +27,10 @@
           <TextBlock Classes="faint" Text="{Binding ListSubtitle}" />
         </StackPanel>
         <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Top">
+          <Button Classes="tool" Click="OnAddTodoClick"
+                  ToolTip.Tip="新建自建待办">
+            <TextBlock Classes="icon" Text="&#xF067;" />
+          </Button>
           <Button Classes="tool" Click="OnMarkAllReadClick"
                   IsVisible="{Binding ShowUnreadBadge}"
                   ToolTip.Tip="把公告全部标记为已读（雨课堂只提供「全部已读」接口）">
@@ -42,6 +46,52 @@
 
       <!-- 提示条 -->
       <StackPanel Grid.Row="1" Spacing="6" Margin="18,0,14,6">
+        <!-- 搜索：匹配标题 / 课程 / 备注 / 标签 -->
+        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+          <TextBox Grid.Column="0" Text="{Binding SearchText, Mode=TwoWay}"
+                   PlaceholderText="搜索标题、课程、备注、标签…"
+                   FontSize="12" MinHeight="30" Padding="8,4" />
+          <Button Grid.Column="1" Classes="tool" Click="OnClearSearchClick"
+                  IsVisible="{Binding IsSearching}" ToolTip.Tip="清除搜索">
+            <TextBlock Classes="icon" Text="&#xF00D;" />
+          </Button>
+        </Grid>
+
+        <!-- 今天的课（只在我的一天展示，来自课表展开） -->
+        <StackPanel Spacing="6" IsVisible="{Binding ShowTodayClasses}">
+          <TextBlock Text="今天的课" FontSize="12" FontWeight="SemiBold"
+                     Foreground="{DynamicResource TodoTextSecondary}" />
+          <ItemsControl ItemsSource="{Binding TodayClasses}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ClassSessionViewModel">
+                <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,2">
+                  <TextBlock Grid.Column="0" Classes="meta" Text="{Binding TimeText}"
+                             VerticalAlignment="Center" />
+                  <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13"
+                             Margin="10,0" TextTrimming="CharacterEllipsis"
+                             Foreground="{DynamicResource TodoTextPrimary}"
+                             VerticalAlignment="Center" />
+                  <TextBlock Grid.Column="2" Classes="faint" Text="{Binding Location}"
+                             IsVisible="{Binding HasLocation}" VerticalAlignment="Center" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+          <Border Height="1" Background="{DynamicResource TodoBorder}" Margin="0,4,0,0" />
+        </StackPanel>
+        <!-- 数据版本高于程序：只读保护横幅（绝不覆盖新数据） -->
+        <Border IsVisible="{Binding IsDataReadOnly}"
+                Background="{DynamicResource TodoWarningBackground}"
+                BorderBrush="{DynamicResource TodoWarningBorder}" BorderThickness="1"
+                CornerRadius="4" Padding="10,8">
+          <StackPanel Spacing="2">
+            <TextBlock Text="数据版本高于当前程序，已进入只读模式" FontSize="12" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TodoTextPrimary}" />
+            <TextBlock Text="{Binding DataReadOnlyWarning}" FontSize="11" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TodoTextSecondary}" />
+          </StackPanel>
+        </Border>
+
         <Border IsVisible="{Binding HasWarnings}"
                 Background="{DynamicResource TodoWarningBackground}"
                 BorderBrush="{DynamicResource TodoWarningBorder}" BorderThickness="1"
@@ -101,12 +151,12 @@
 
                   <!-- 主体：主标题学科名、副标题作业/考试标题（学期前缀已剥离） -->
                   <StackPanel Grid.Column="1" Margin="10,0,8,0" Spacing="3">
-                    <TextBlock Classes="title" Text="{Binding DisplaySubject}" />
+                    <TextBlock Classes="title" Text="{Binding HeaderPrimary}" />
 
                     <!-- 副标题行：Grid 的 * 列让标题按实际宽度截断（显式 Width=200
                          在手机上会盖住右侧徽标），完成状态跟在标题后。 -->
                     <Grid ColumnDefinitions="*,Auto">
-                      <TextBlock Classes="faint" Text="{Binding DisplayTitle}" />
+                      <TextBlock Classes="faint" Text="{Binding HeaderSecondary}" />
                       <TextBlock Grid.Column="1" Classes="overdue" Text="{Binding StatusText}"
                                  Margin="6,0,0,0"
                                  IsVisible="{Binding IsCompletedOnServer}" />
@@ -127,6 +177,14 @@
 
                   <!-- 右侧徽标：进度 / 已过期 / 真实完成状态 -->
                   <StackPanel Grid.Column="2" Spacing="4" VerticalAlignment="Top">
+                    <Button Classes="tool" IsVisible="{Binding IsStarred}" Click="OnStarClick"
+                            Padding="2" ToolTip.Tip="取消星标">
+                      <TextBlock Text="&#xF005;" FontSize="13"
+                                 Foreground="{DynamicResource TodoWarningBorder}" />
+                    </Button>
+                    <Border Classes="badge warn" IsVisible="{Binding IsHighPriority}">
+                      <TextBlock Text="高" />
+                    </Border>
                     <Border Classes="badge progress" IsVisible="{Binding ShowProgress}">
                       <TextBlock Text="{Binding ProgressText}" />
                     </Border>

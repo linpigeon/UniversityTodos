@@ -19,7 +19,9 @@ namespace HomeworkReminder.Android;
 /// </para>
 /// </summary>
 [Activity(
-    Label = "HomeworkReminder.Android",
+    // 启动器上显示的就是这个 Label（Activity 的 label 覆盖 application 的）。
+    // 原先保持模板默认值 "HomeworkReminder.Android"，桌面图标下面会原样显示这串。
+    Label = "大学事项综合待办",
     Theme = "@style/MyTheme.NoActionBar",
     Icon = "@drawable/icon",
     MainLauncher = true,

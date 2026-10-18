@@ -44,7 +44,36 @@ function Get-Sha256 {
   return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
 }
 
+# 按 Windows 命令行规则给单个参数加引号（反斜杠只在引号前才需要翻倍）。
+# 原先只做 `"..." + $_ -replace '"','\"' + '"'`，以反斜杠结尾的参数
+# （如 `--target D:\sandbox\`）会把结尾的 `\"` 变成转义引号，后续参数被并进同一个参数。
+function ConvertTo-QuotedArg {
+  param([string]$Value)
+  if ($Value -eq '') { return '""' }
+  if ($Value -notmatch '[\s"]') { return $Value }
+
+  $sb = New-Object System.Text.StringBuilder
+  [void]$sb.Append('"')
+  $backslashes = 0
+  foreach ($ch in $Value.ToCharArray()) {
+    if ($ch -eq '\') { $backslashes++; continue }
+    if ($ch -eq '"') {
+      [void]$sb.Append('\' * ($backslashes * 2 + 1))
+      [void]$sb.Append('"')
+      $backslashes = 0
+      continue
+    }
+    if ($backslashes -gt 0) { [void]$sb.Append('\' * $backslashes); $backslashes = 0 }
+    [void]$sb.Append($ch)
+  }
+  if ($backslashes -gt 0) { [void]$sb.Append('\' * ($backslashes * 2)) }
+  [void]$sb.Append('"')
+  return $sb.ToString()
+}
+
 $exitCode = 0
+# 失败时是否可以把目标 exe 当作「可信旧版本」重新拉起；替换/回滚成功前一直为 true。
+$safeToRestart = $true
 try {
   Write-Log "更新器启动：目标=$TargetExe"
   Write-Log "            新文件=$NewExe 父进程=$ParentPid"
@@ -80,55 +109,76 @@ try {
   }
   Write-Log '父进程已退出，开始替换'
 
-  # ---- 替换（覆盖失败时用改名让位兜底）----
+  # ---- 替换：先无条件改名备份，再放入新文件 ----
+  #
+  # 顺序不能反过来。原先直接 `Move-Item -Force` 覆盖目标：目标没被占用时（最常见）
+  # 这一步会成功，于是**根本不会创建 .old 备份**；一旦事后哈希校验失败，
+  # 回滚分支因为找不到 .old 而直接 throw，坏/未验证的 exe 留在安装位置，
+  # 与「替换后校验失败会回滚」的承诺相反。
+  # 同卷改名是原子操作，而且文件被占用时也允许改名。
   $oldPath = "$TargetExe.old"
+  $safeToRestart = $true   # 目标位置当前是否是「可信的旧版本」
+
+  $backupDone = $false
+  for ($i = 1; $i -le 20; $i++) {
+    try {
+      if (Test-Path -LiteralPath $oldPath) { Remove-Item -LiteralPath $oldPath -Force -ErrorAction SilentlyContinue }
+      Move-Item -LiteralPath $TargetExe -Destination $oldPath -Force -ErrorAction Stop
+      $backupDone = $true
+      break
+    } catch {
+      Start-Sleep -Milliseconds 500
+    }
+  }
+  if (-not $backupDone) {
+    throw '替换失败：无法把旧版本改名备份（文件可能被其他程序占用，如杀毒软件/资源管理器）。'
+  }
+
   $swapped = $false
   for ($i = 1; $i -le 20; $i++) {
     try {
       Move-Item -LiteralPath $NewExe -Destination $TargetExe -Force -ErrorAction Stop
       $swapped = $true
+      $safeToRestart = $false   # 新文件尚未校验
       break
     } catch {
-      # 覆盖写不进去：把旧文件改名让位（**改名在文件被占用时也是允许的**），再放新文件。
-      try {
-        if (Test-Path -LiteralPath $oldPath) { Remove-Item -LiteralPath $oldPath -Force -ErrorAction SilentlyContinue }
-        Move-Item -LiteralPath $TargetExe -Destination $oldPath -Force -ErrorAction Stop
-        Move-Item -LiteralPath $NewExe -Destination $TargetExe -Force -ErrorAction Stop
-        $swapped = $true
-        Write-Log "第 $i 次尝试：以「改名让位」方式完成替换"
-        break
-      } catch {
-        Start-Sleep -Milliseconds 500
-      }
+      Start-Sleep -Milliseconds 500
     }
   }
 
   if (-not $swapped) {
-    # 20 次（约 10 秒）都没换成：尽量把现场恢复成「旧版本可用」。
-    if ((Test-Path -LiteralPath $oldPath) -and -not (Test-Path -LiteralPath $TargetExe)) {
-      try { Move-Item -LiteralPath $oldPath -Destination $TargetExe -Force -ErrorAction Stop } catch { }
+    # 新文件放不进去：把旧版本恢复回来，保证用户至少还能用。
+    # 先标记「目标不可信」：跨卷 Move 中途失败可能留下截断的目标文件，不能当成旧版本重启。
+    $safeToRestart = $false
+    try {
+      if (Test-Path -LiteralPath $TargetExe) { Remove-Item -LiteralPath $TargetExe -Force -ErrorAction SilentlyContinue }
+      Move-Item -LiteralPath $oldPath -Destination $TargetExe -Force -ErrorAction Stop
+      $safeToRestart = $true
+      Write-Log '新文件落位失败，已恢复旧版本'
+    } catch {
+      Write-Log '新文件落位失败，且恢复旧版本失败——请手动重新安装'
     }
-    throw '替换失败：文件可能被其他程序占用（杀毒软件/资源管理器预览）。请关闭后手动替换。'
+    throw '替换失败：新文件无法写入安装目录（杀毒软件/资源管理器可能占用）。'
   }
 
   # ---- 校验替换结果 ----
   if ($ExpectedSha256) {
     $actual = Get-Sha256 -Path $TargetExe
     if ($actual -ne $ExpectedSha256.ToUpperInvariant()) {
-      # 换上去的文件不对：回滚到旧版本，保证用户至少还能用。
-      if (Test-Path -LiteralPath $oldPath) {
-        try {
-          Move-Item -LiteralPath $TargetExe -Destination "$TargetExe.bad" -Force -ErrorAction Stop
-          Move-Item -LiteralPath $oldPath -Destination $TargetExe -Force -ErrorAction Stop
-          Write-Log '替换后校验失败，已回滚到旧版本'
-        } catch {
-          Write-Log '替换后校验失败，且回滚失败——请手动重新安装'
-        }
+      # 换上去的文件不对：删掉坏目标、恢复旧版本。
+      try {
+        if (Test-Path -LiteralPath $TargetExe) { Remove-Item -LiteralPath $TargetExe -Force -ErrorAction Stop }
+        Move-Item -LiteralPath $oldPath -Destination $TargetExe -Force -ErrorAction Stop
+        $safeToRestart = $true
+        Write-Log '替换后校验失败，已回滚到旧版本'
+      } catch {
+        Write-Log '替换后校验失败，且回滚失败——请手动重新安装'
       }
       throw "替换后校验失败：期望 $ExpectedSha256，实际 $actual"
     }
     Write-Log '替换后哈希校验通过'
   }
+  $safeToRestart = $true
 
   # 清掉旧版本备份（回滚已不可能，但此刻新版本已验证可用）
   if (Test-Path -LiteralPath $oldPath) {
@@ -154,8 +204,8 @@ try {
     if ($restartArgs.Count -eq 0) {
       Start-Process -FilePath $TargetExe -WorkingDirectory (Split-Path -Parent $TargetExe)
     } else {
-      # 每个参数单独加引号并转义内部引号，避免含空格的路径被拆开。
-      $argString = ($restartArgs | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' }) -join ' '
+      # 逐个参数按命令行规则加引号，避免含空格的路径/反斜杠结尾被拆错。
+      $argString = ($restartArgs | ForEach-Object { ConvertTo-QuotedArg $_ }) -join ' '
       Start-Process -FilePath $TargetExe -ArgumentList $argString -WorkingDirectory (Split-Path -Parent $TargetExe)
     }
     Write-Log '已重启新版本'
@@ -168,6 +218,19 @@ try {
 catch {
   $exitCode = 1
   Write-Log "更新失败：$($_.Exception.Message)"
+
+  # 应用已经按「更新已就绪」退出了。失败时必须把旧版本重新拉起来，
+  # 否则用户看到的是程序凭空消失，而失败原因只留在 %TEMP% 的日志里。
+  # 只有目标位置确实是可信旧版本（$safeToRestart）时才重启——
+  # 回滚失败时目标可能是个坏文件，那就不该执行它。
+  if ($Restart -and $safeToRestart -and (Test-Path -LiteralPath $TargetExe)) {
+    try {
+      Start-Process -FilePath $TargetExe -WorkingDirectory (Split-Path -Parent $TargetExe)
+      Write-Log '已重新启动旧版本'
+    } catch {
+      Write-Log "重新启动旧版本失败：$($_.Exception.Message)"
+    }
+  }
 }
 
 # ---- 清理本次下载目录 ----

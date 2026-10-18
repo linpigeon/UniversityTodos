@@ -73,6 +73,24 @@ public sealed class YktApiClient : IYktApi, IDisposable
     /// <summary>实测节流：单账号串行 + 延迟，避免触发风控。</summary>
     private const int ThrottleMs = 200;
 
+    /// <summary>
+    /// 空 JSON 对象（<c>{}</c>）元素，用于「本次没有数据」的降级返回。
+    /// <para>
+    /// <b>不能返回 <c>default(JsonElement)</c></b>：它的 ValueKind 是 Undefined，
+    /// 任何 <c>TryGetProperty</c> / <c>Deserialize</c> 都会抛
+    /// <c>InvalidOperationException</c>（.NET 实测），而各消费方只 catch
+    /// <c>YktApiException</c> 系列 → 异常直接冒到 SyncService 之外，整次三源同步失败。
+    /// 返回空对象则让消费方自然得到「空列表 / 空值」。
+    /// </para>
+    /// </summary>
+    private static readonly JsonElement EmptyObject = CreateEmptyObject();
+
+    private static JsonElement CreateEmptyObject()
+    {
+        using var doc = JsonDocument.Parse("{}");
+        return doc.RootElement.Clone();
+    }
+
     private readonly HttpClient _http;
     private readonly bool _ownsHttp;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -337,12 +355,23 @@ public sealed class YktApiClient : IYktApi, IDisposable
         {
             var text = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
 
-            if (resp.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            // 只有 401 才是「会话失效」。403 在雨课堂有别的来源：
+            //   - POST 缺 X-CSRFToken（docs/ykt-api.md 明确记录）；
+            //   - 风控 / WAF 拦截。
+            // 把 403 也当成登录失效会丢掉**仍然有效**的会话：界面提示重新登录、
+            // 自动同步被停，而用户重贴同一个 cookie 后每次 POST 依旧 403，陷入死循环。
+            if (resp.StatusCode == HttpStatusCode.Unauthorized)
                 throw new YktAuthExpiredException(
                     $"登录态失效（HTTP {(int)resp.StatusCode}），请重新扫码登录", (int)resp.StatusCode);
 
             if (string.IsNullOrWhiteSpace(text))
-                return default;
+            {
+                // 非 2xx 且响应体为空：这属于失败，不能当成「没有数据」静默降级。
+                if (!resp.IsSuccessStatusCode)
+                    throw new YktApiException(
+                        $"接口返回 {(int)resp.StatusCode}（空响应）", (int)resp.StatusCode);
+                return EmptyObject;
+            }
 
             JsonDocument doc;
             try
@@ -354,13 +383,19 @@ public sealed class YktApiClient : IYktApi, IDisposable
                 // leaf_info 等端点在对象不存在时会返回非 JSON 的提示文本。
                 if (!resp.IsSuccessStatusCode)
                     throw new YktApiException($"接口返回 {(int)resp.StatusCode}：{Truncate(text)}", (int)resp.StatusCode);
-                return default;
+                return EmptyObject;
             }
 
             using (doc)
             {
                 var root = doc.RootElement;
-                if (root.ValueKind != JsonValueKind.Object) return default;
+                if (root.ValueKind != JsonValueKind.Object)
+                {
+                    if (!resp.IsSuccessStatusCode)
+                        throw new YktApiException(
+                            $"接口返回 {(int)resp.StatusCode}：{Truncate(text)}", (int)resp.StatusCode);
+                    return EmptyObject;
+                }
 
                 // 雨课堂用多种字段名表达错误：errcode / error_code / errorcode。
                 var errCode = ReadInt(root, "errcode") ?? ReadInt(root, "error_code") ?? ReadInt(root, "errorcode");

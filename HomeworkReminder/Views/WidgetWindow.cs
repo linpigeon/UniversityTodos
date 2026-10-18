@@ -62,7 +62,7 @@ public class WidgetWindow : Window
         WindowStartupLocation = WindowStartupLocation.Manual;
         TransparencyLevelHint = [WindowTransparencyLevel.Transparent];
         Background = Brushes.Transparent;
-        Title = "作业提醒小组件";
+        Title = "大学事项综合待办小组件";
 
         Closing += OnClosing;
         PointerMoved += OnHoverMoved;

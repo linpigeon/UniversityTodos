@@ -39,6 +39,16 @@ public sealed class ReleaseInfo
     /// </para>
     /// </summary>
     [JsonIgnore] public string? ManifestJson { get; set; }
+
+    /// <summary>
+    /// release 里**有**清单资产、但这次没取到（超时/被墙/返回非 JSON）。
+    /// <para>
+    /// 与「根本没有清单」必须区分：前者说明本该有哈希可校验，只是这次失败了；
+    /// 选包时应优先换一个清单已取到的源，界面也要如实说明「清单拉取失败」，
+    /// 而不是笼统地显示「无清单」。
+    /// </para>
+    /// </summary>
+    [JsonIgnore] public bool ManifestFetchFailed { get; set; }
 }
 
 /// <summary>Release 附件。</summary>
@@ -76,11 +86,11 @@ public static class UpdateService
     public static readonly (string Name, string ApiUrl, string RepoUrl)[] Sources =
     [
         ("GitHub",
-            "https://api.github.com/repos/linpigeon/ChangjiangYu_HomeworkReminder/releases?per_page=10",
-            "https://github.com/linpigeon/ChangjiangYu_HomeworkReminder"),
+            "https://api.github.com/repos/linpigeon/UniversityTodos/releases?per_page=10",
+            "https://github.com/linpigeon/UniversityTodos"),
         ("Gitea",
-            "https://git.pigeon-lin.top/api/v1/repos/lin/ChangjiangYu_HomeworkReminder/releases?limit=10",
-            "https://git.pigeon-lin.top/lin/ChangjiangYu_HomeworkReminder"),
+            "https://git.pigeon-lin.top/api/v1/repos/lin/UniversityTodos/releases?limit=10",
+            "https://git.pigeon-lin.top/lin/UniversityTodos"),
     ];
 
     /// <summary>更新清单在 release 里的资产名。</summary>
@@ -274,11 +284,13 @@ public static class UpdateService
         }
         catch (Exception)
         {
-            // 拿不到清单不影响更新可用性，静默降级。
+            // 拿不到清单不影响更新可用性，静默降级——但**记下这是「有清单却没取到」**，
+            // 选包时会优先换一个清单已取到的源，界面也能如实说明原因。
             // 注意这里**必须**连超时一起吞掉：清单是可选资产，它的超时曾经
             // （因为 TaskCanceledException 也是 OperationCanceledException）
             // 被当成取消透传出去，把整次「检查更新」打成失败——
             // 而它的注释本来就写着「取回失败不视为查询失败」。
+            release.ManifestFetchFailed = true;
         }
     }
 
@@ -361,8 +373,15 @@ public static class UpdateService
 
     // ---------------- 资产挑选与下载 ----------------
 
-    /// <summary>挑中的更新包（资产 + 可选的清单）。</summary>
-    public sealed record PackageChoice(ReleaseAsset Asset, UpdateManifest? Manifest, string Source);
+    /// <summary>
+    /// 挑中的更新包（资产 + 可选的清单）。
+    /// <para>
+    /// <c>ManifestFetchFailed</c> 表示 release 里**有**清单资产但这次没取到，
+    /// 与「根本没有清单」区分（用于文案与换源）。
+    /// </para>
+    /// </summary>
+    public sealed record PackageChoice(
+        ReleaseAsset Asset, UpdateManifest? Manifest, string Source, bool ManifestFetchFailed = false);
 
     /// <summary>
     /// 在 release 的资产里挑出适用于本平台的更新包。
@@ -395,19 +414,80 @@ public static class UpdateService
             }
         }
 
+        // 清单的版本必须与 release tag 对得上：对不上说明这是旧清单（release 里残留的资产），
+        // 拿它的哈希去校验新包必然不符，等于把更新打死。
+        if (manifest is not null
+            && !string.IsNullOrWhiteSpace(manifest.Version)
+            && !SameVersion(manifest.Version, release.TagName))
+        {
+            manifest = null;
+        }
+
         // ① 有清单：按清单里的文件名精确匹配
         if (manifest?.File is { Length: > 0 } wanted)
         {
             var hit = assets.FirstOrDefault(a =>
                 string.Equals(a.Name, wanted, StringComparison.OrdinalIgnoreCase));
-            if (hit is not null) return new PackageChoice(hit, manifest, sourceName);
+            if (hit is not null) return new PackageChoice(hit, manifest, sourceName, release.ManifestFetchFailed);
+
+            // 清单点名了不存在的文件 → 清单已过期/上传不全。
+            // **不能把这份清单继续挂到兜底包上**：兜底包的哈希几乎必然对不上清单，
+            // 更新会以「校验失败」告终，所谓降级路径根本不成立。
+            manifest = null;
         }
 
         // ② 没清单（或清单里的文件不在资产里）：按平台特征兜底
         var fallback = assets.FirstOrDefault(a =>
             a.Name is { Length: > 0 } name &&
             PlatformAssetMarkers.All(m => name.Contains(m, StringComparison.OrdinalIgnoreCase)));
-        return fallback is null ? null : new PackageChoice(fallback, manifest, sourceName);
+        return fallback is null
+            ? null
+            : new PackageChoice(fallback, manifest, sourceName, release.ManifestFetchFailed);
+    }
+
+    /// <summary>
+    /// 为某个 tag 收集**所有源**的可用包，供下载失败时按序换源。
+    /// <para>
+    /// 背景：两个源常有同一版本，原先只取 <see cref="Outcome.Best"/> 一条，
+    /// 而 GitHub 在 <see cref="Sources"/> 里排第一 —— 国内 github.com 的
+    /// releases/download 经常连不通（api.github.com 却正常），于是检查更新成功、
+    /// 下载必然失败，而 Gitea 镜像明明可用。这里把同版本的包都列出来，
+    /// 清单可校验的优先，其余保持源顺序。
+    /// </para>
+    /// </summary>
+    public static List<PackageChoice> ChoosePackages(Outcome outcome, string tag)
+    {
+        var choices = new List<PackageChoice>();
+        foreach (var result in outcome.Results)
+        {
+            if (result.Release is not { TagName: var resultTag } release) continue;
+            if (!SameVersion(resultTag, tag)) continue;
+            if (ChoosePackage(release, result.Source, release.ManifestJson) is { } choice)
+                choices.Add(choice);
+        }
+
+        // 有清单（能校验哈希）的优先；清单拉取失败的排最后。OrderBy 稳定，其余保持源顺序。
+        return choices
+            .OrderBy(c => c.Manifest is not null ? 0 : c.ManifestFetchFailed ? 2 : 1)
+            .ToList();
+    }
+
+    /// <summary>两个版本串是否指同一版本（容忍 v 前缀、构建元数据与预发布后缀）。</summary>
+    private static bool SameVersion(string? a, string? b)
+    {
+        static string Normalize(string? raw)
+        {
+            var text = (raw ?? string.Empty).Trim();
+            if (text.StartsWith('v') || text.StartsWith('V')) text = text[1..];
+            var plus = text.IndexOf('+');
+            if (plus >= 0) text = text[..plus];
+            var dash = text.IndexOf('-');
+            if (dash >= 0) text = text[..dash];
+            return text;
+        }
+
+        var left = Normalize(a);
+        return left.Length > 0 && string.Equals(left, Normalize(b), StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>下载并校验的结果。</summary>
@@ -441,12 +521,20 @@ public static class UpdateService
     {
         var url = choice.Asset.BrowserDownloadUrl
             ?? throw new InvalidOperationException("该资产没有下载地址");
-        var fileName = choice.Asset.Name ?? "update.zip";
+
+        // 资产名来自 release API（服务端可控），不能直接当本地文件名：
+        // 含 "..\\.." 或绝对路径时 Path.Combine 会写出下载目录之外。
+        // 只取文件名部分，并再校验最终路径确实落在下载目录内。
+        var fileName = SafeFileName(choice.Asset.Name);
 
         Directory.CreateDirectory(targetDirectory);
         // 先下到 .part，成功后再改名——中断时不会留一个看起来完整的 zip。
         var finalPath = Path.Combine(targetDirectory, fileName);
         var partPath = finalPath + ".part";
+
+        var fullDir = Path.GetFullPath(targetDirectory) + Path.DirectorySeparatorChar;
+        if (!Path.GetFullPath(finalPath).StartsWith(fullDir, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException($"更新包文件名非法：{choice.Asset.Name}");
 
         try
         {
@@ -550,6 +638,15 @@ public static class UpdateService
     {
         using var stream = File.OpenRead(path);
         return Convert.ToHexString(SHA256.HashData(stream));
+    }
+
+    /// <summary>把远端资产名收敛成安全的本地文件名（去掉目录、拒绝非法字符）。</summary>
+    private static string SafeFileName(string? assetName)
+    {
+        var name = Path.GetFileName(assetName ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(name) || name is "." or "..") return "update.zip";
+        if (name.IndexOfAny(['\\', '/', ':', '*', '?', '"', '<', '>', '|']) >= 0) return "update.zip";
+        return name;
     }
 
     private static string Normalize(string hash) => hash.Trim().Replace(" ", string.Empty).ToUpperInvariant();

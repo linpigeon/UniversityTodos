@@ -59,10 +59,10 @@
                   x:DataType="vm:TodoItemViewModel">
 
         <StackPanel Spacing="6">
-          <TextBlock Text="{Binding DisplaySubject}" FontSize="19" FontWeight="SemiBold"
+          <TextBlock Text="{Binding HeaderPrimary}" FontSize="19" FontWeight="SemiBold"
                      TextWrapping="Wrap"
                      Foreground="{DynamicResource TodoTextPrimary}" />
-          <TextBlock Classes="meta" Text="{Binding DisplayTitle}" TextWrapping="Wrap" />
+          <TextBlock Classes="meta" Text="{Binding HeaderSecondary}" TextWrapping="Wrap" />
         </StackPanel>
 
         <StackPanel Spacing="2">
@@ -79,7 +79,25 @@
                      Foreground="{DynamicResource TodoTextPrimary}" />
         </StackPanel>
 
-        <StackPanel Spacing="2">
+        <StackPanel Spacing="2" IsVisible="{Binding ShowPriority}">
+          <TextBlock Classes="faint" Text="优先级" />
+          <TextBlock Text="{Binding PriorityText}" FontSize="14"
+                     Foreground="{DynamicResource TodoTextPrimary}" />
+        </StackPanel>
+
+        <StackPanel Spacing="2" IsVisible="{Binding HasTags}">
+          <TextBlock Classes="faint" Text="标签" />
+          <TextBlock Text="{Binding TagsText}" FontSize="13" TextWrapping="Wrap"
+                     Foreground="{DynamicResource TodoTextPrimary}" />
+        </StackPanel>
+
+        <StackPanel Spacing="2" IsVisible="{Binding HasNote}">
+          <TextBlock Classes="faint" Text="备注" />
+          <TextBlock Text="{Binding NoteText}" FontSize="13" TextWrapping="Wrap"
+                     Foreground="{DynamicResource TodoTextPrimary}" />
+        </StackPanel>
+
+        <StackPanel Spacing="2" IsVisible="{Binding !IsManual}">
           <TextBlock Classes="faint" Text="雨课堂完成状态" />
           <TextBlock Text="{Binding StatusText}" FontSize="14"
                      Foreground="{DynamicResource TodoTextPrimary}" />
@@ -95,14 +113,30 @@
                   IsChecked="{Binding IsDone, Mode=OneWay}"
                   Click="OnCheckboxClick" />
 
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Classes="outline" Content="{Binding StarButtonText}"
+                  Click="OnToggleStarClick" Padding="10,5" FontSize="12" />
+          <Button Classes="outline" Content="{Binding MyDayButtonText}"
+                  Click="OnToggleMyDayClick" Padding="10,5" FontSize="12" />
+        </StackPanel>
+
+        <!-- 自建事项才能编辑/删除；平台事项只能标记本地状态 -->
+        <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsManual}">
+          <Button Classes="outline" Content="编辑" Click="OnEditManualClick"
+                  Padding="10,5" FontSize="12" />
+          <Button Classes="outline" Content="删除" Click="OnDeleteManualClick"
+                  Padding="10,5" FontSize="12" />
+        </StackPanel>
+
         <!--
           不做 IsVisible 守卫：MainViewModel.OpenSource 在 SourceUrl 为空时会按课程
           回落到课程日志页，因此这条永远打得开。原先绑 ObjectConverters.IsNotNull
           会把它藏掉，而同一条事项在列表栏的同一个按钮却是可点的——同一件事两个入口
-          行为不一致。
+          行为不一致。自建事项没有平台页面，所以按 ShowOpenButton 隐藏。
         -->
         <Button Classes="primary" Content="{Binding OpenButtonText}"
                 HorizontalAlignment="Left"
+                IsVisible="{Binding ShowOpenButton}"
                 Click="OnOpenSourceClick" />
       </StackPanel>
     </ScrollViewer>

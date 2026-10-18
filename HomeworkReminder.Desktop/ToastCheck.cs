@@ -47,7 +47,7 @@ internal static class ToastCheck
 
         var shortcut = System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            @"Microsoft\Windows\Start Menu\Programs\作业提醒.lnk");
+            @"Microsoft\Windows\Start Menu\Programs\大学事项综合待办.lnk");
         Console.WriteLine($"[2] 开始菜单快捷方式 : {(System.IO.File.Exists(shortcut) ? "已就位" : "未创建")}");
         Console.WriteLine($"    {shortcut}");
 

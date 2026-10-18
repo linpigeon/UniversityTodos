@@ -101,7 +101,7 @@
               CornerRadius="4" Padding="10,8">
         <TextBlock FontSize="12" TextWrapping="Wrap"
                    Foreground="{DynamicResource TodoTextPrimary}"
-                   Text="未设置「学期第一周」时课表只按周次显示、不显示具体日期。到 设置 → 通用 的「学期」里填写学期第一周周一后即可显示日期。" />
+                   Text="未设置「学期第一周」：日期按「本周为第 1 周」估算，仅供预览。到 设置 → 通用 的「学期」里填写学期第一周周一后，日期与周次才会准确。" />
       </Border>
       <Border IsVisible="{Binding TimetableStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
               Background="{DynamicResource TodoAccentSoft}"

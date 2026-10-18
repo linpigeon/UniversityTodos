@@ -22,6 +22,86 @@ public partial class SettingsView : UserControl
         AttachUpdateConfirm();
     }
 
+    /// <summary>打开课表管理（手工增删改课程 + CSV 导入）。</summary>
+    private async void OnManageScheduleClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is not { } vm) return;
+        try
+        {
+            if (TopLevel.GetTopLevel(this) is not Window owner) return;
+            await vm.OpenScheduleManagerAsync(owner);
+        }
+        catch (Exception ex)
+        {
+            SidebarView.ReportHandlerFailure(vm, "管理课表", ex);
+        }
+    }
+
+    /// <summary>导出数据备份（设置/登录态/待办/课表等业务 JSON）。</summary>
+    private async void OnExportBackupClick(object? sender, RoutedEventArgs e)
+    {
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+        try
+        {
+            var file = await owner.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "导出数据备份",
+                SuggestedFileName = DataBackupService.SuggestedFileName(),
+                DefaultExtension = "zip",
+                FileTypeChoices =
+                [
+                    new FilePickerFileType("备份文件") { Patterns = ["*.zip"] },
+                ],
+            });
+            if (file is null) return;
+
+            var count = DataBackupService.CreateBackup(AppPaths.DataDirectory, file.Path.LocalPath);
+            await MessageBox.ShowAsync(owner, "备份完成",
+                count > 0 ? $"已导出 {count} 个数据文件。" : "没有可备份的数据文件。");
+        }
+        catch (Exception ex)
+        {
+            await MessageBox.ShowAsync(owner, "备份失败", ex.Message);
+        }
+    }
+
+    /// <summary>从备份恢复；恢复前自动把当前数据另存一份。</summary>
+    private async void OnRestoreBackupClick(object? sender, RoutedEventArgs e)
+    {
+        if (TopLevel.GetTopLevel(this) is not Window owner) return;
+        try
+        {
+            var picked = await owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "选择数据备份",
+                AllowMultiple = false,
+                FileTypeFilter =
+                [
+                    new FilePickerFileType("备份文件") { Patterns = ["*.zip"] },
+                ],
+            });
+            if (picked.Count == 0) return;
+
+            if (!await MessageBox.ConfirmAsync(owner, "从备份恢复",
+                    "这会覆盖当前设置、登录态、待办缓存、自建待办与课表。\n"
+                    + "恢复前会自动把当前数据另存一份。继续吗？"))
+                return;
+
+            var safety = DataBackupService.BackupBeforeRestore(AppPaths.DataDirectory);
+            var count = DataBackupService.RestoreBackup(
+                picked[0].Path.LocalPath, AppPaths.DataDirectory);
+
+            var note = safety is null ? string.Empty : $"\n\n恢复前的数据已备份到：\n{safety}";
+            await MessageBox.ShowAsync(owner, "恢复完成",
+                $"已恢复 {count} 个文件。{note}\n\n应用将退出，请重新打开。");
+            MainViewModel.PlatformServices?.RequestExitForUpdate();
+        }
+        catch (Exception ex)
+        {
+            await MessageBox.ShowAsync(owner, "恢复失败", ex.Message);
+        }
+    }
+
     /// <summary>把确认框挂到当前 ViewModel 上（无 ViewModel 时清空）。</summary>
     private void AttachUpdateConfirm()
     {

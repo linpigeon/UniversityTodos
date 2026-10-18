@@ -27,12 +27,15 @@ namespace HomeworkReminder.Desktop;
 internal sealed class WindowsNotifier : INotifier
 {
     /// <summary>
-    /// 自注册的 AppUserModelId。命名遵循「公司.产品」惯例，
-    /// 这样通知来源显示为「作业提醒」而不是「Windows PowerShell」。
+    /// 自注册的 AppUserModelId。命名遵循「公司.产品」惯例。
+    /// <para>
+    /// <b>不要因为改名而改这里</b>：AUMID 是通知平台的身份，改名后旧的开始菜单快捷方式、
+    /// 已注册的注册表项与历史通知都会对不上；显示名（<see cref="DisplayName"/>）才是给用户看的。
+    /// </para>
     /// </summary>
     private const string Aumid = "HomeworkReminder.Desktop";
 
-    private const string DisplayName = "作业提醒";
+    private const string DisplayName = "大学事项综合待办";
 
     private bool _registered;
     private string? _unavailableReason;
@@ -109,6 +112,18 @@ internal sealed class WindowsNotifier : INotifier
         if (!Directory.Exists(startMenu)) return;
 
         var linkPath = Path.Combine(startMenu, $"{DisplayName}.lnk");
+
+        // 改名前的快捷方式一并清掉，避免开始菜单里出现两个指向同一 exe 的入口。
+        // AUMID 未变，清理旧入口不影响通知身份。
+        try
+        {
+            var legacy = Path.Combine(startMenu, "作业提醒.lnk");
+            if (File.Exists(legacy)) File.Delete(legacy);
+        }
+        catch
+        {
+            // 删不掉只是多一个旧图标，不影响通知。
+        }
 
         // 已存在且指向同一个可执行文件时无需重建。
         if (File.Exists(linkPath) && ShortcutTargets(linkPath, exe)) return;

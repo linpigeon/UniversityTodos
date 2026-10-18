@@ -137,10 +137,15 @@ public sealed partial class PigaiApiClient : IDisposable
     }
 
     /// <summary>把 <c>2026-12-06 23:59</c> 解析成绝对时间（按北京时间）。</summary>
-    private static DateTimeOffset? ParseDue(string text)
+    internal static DateTimeOffset? ParseDue(string text)
     {
+        // 截止时间正则用的是 \s+（页面排版可能是两个空格或制表符），
+        // 而 TryParseExact 只认单个空格。这里先归一化，否则会静默解析失败 →
+        // DueAt=null → 条目显示「无期限」，排序与倒计时都丢掉这个截止时间。
+        var normalized = WhitespaceRegex().Replace(text.Trim(), " ");
+
         if (!DateTime.TryParseExact(
-                text.Trim(),
+                normalized,
                 "yyyy-MM-dd HH:mm",
                 System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.None,

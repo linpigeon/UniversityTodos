@@ -93,7 +93,7 @@ public sealed class TrayIconHost : IDisposable
     public static TrayIconHost Attach()
     {
         var (icon, owns) = LoadAppIcon();
-        var host = new TrayIconHost("作业提醒 · 长江雨课堂", icon, owns);
+        var host = new TrayIconHost("大学事项综合待办", icon, owns);
         host.LeftClicked += (_, _) => (Avalonia.Application.Current as App)?.ShowMainWindow();
         host.RightClicked += (_, pos) => (Avalonia.Application.Current as App)?.ShowTrayMenuAt(pos);
         return host;

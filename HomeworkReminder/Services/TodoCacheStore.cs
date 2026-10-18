@@ -19,6 +19,9 @@ namespace HomeworkReminder.Services;
 /// </summary>
 public sealed class TodoCacheFile
 {
+    /// <summary>数据格式版本；高于程序支持版本时进入只读（见 <see cref="DataCompatibility"/>）。</summary>
+    public int SchemaVersion { get; set; } = DataCompatibility.CurrentSchemaVersion;
+
     public DateTimeOffset SyncedAt { get; set; }
 
     public List<TodoItem> Homework { get; set; } = [];
@@ -89,6 +92,7 @@ public sealed class TodoCacheStore : ITodoCacheStore
             var text = await File.ReadAllTextAsync(_path, ct).ConfigureAwait(false);
             var cache = JsonSerializer.Deserialize(text, AppJsonContext.Default.TodoCacheFile);
             if (cache is null) return null;
+            DataCompatibility.Observe(cache.SchemaVersion, _path);
 
             // 合法性校验：坏条目（缺 id/标题、id 前缀与类型不符、时间戳离谱、重复 id）
             // 一律丢弃——缓存文件可能被手改、被旧版本写坏，不能让脏数据进列表。
@@ -107,6 +111,7 @@ public sealed class TodoCacheStore : ITodoCacheStore
 
     public async Task SaveAsync(TodoCacheFile cache, CancellationToken ct = default)
     {
+        if (DataCompatibility.IsReadOnly) return;
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);

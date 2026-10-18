@@ -1,13 +1,23 @@
-# 作业提醒 · HomeworkReminder
+# 大学事项综合待办 · UniversityTodos
 
-用 Avalonia 写的 Windows 桌面待办应用：自动读取**长江雨课堂**的作业与公告，
-以仿 Microsoft To Do 的 Fluent 界面呈现。
+用 Avalonia 写的 Windows / Android 待办应用：自动聚合**长江雨课堂**、**学习通**、**批改网**
+的作业、考试与公告，再加上课表与自建事项，以仿 Microsoft To Do 的 Fluent 界面呈现。
+
+> 仓库：GitHub `linpigeon/UniversityTodos` · Gitea `lin/UniversityTodos`。
+> 代码标识（程序集名、命名空间、数据目录、Android 包名）仍沿用 `HomeworkReminder`，
+> 以便老用户的本地数据与自动更新不中断。
 
 ![界面](docs/screenshots/app-main.png)
 
 ## 功能与特性
 
-* **作业清单**：按课程归集作业，显示截止时间与剩余天数，逾期自动标红
+* **作业清单**：按课程归集雨课堂 / 学习通 / 批改网的作业与考试，显示截止时间与剩余天数，逾期自动标红
+
+* **截止提醒**：临近截止按提前量提醒、每天可发一条逾期汇总；休眠恢复后 30 分钟内会补发
+
+* **自建待办**：标题、截止时间、提醒时间、优先级、标签、备注，参与搜索/星标/我的一天与提醒
+
+* **搜索与星标**：按标题/课程/备注/标签搜索；星标与「加入我的一天」都是本地标记，不改平台数据
 
 * **真实完成状态**：完成进度直接来自雨课堂的作答记录，而不是「截止时间过了没有」
 
@@ -28,6 +38,10 @@
 * **定时自动同步**：默认每 30 分钟同步一次作业列表，间隔可在 `settings.json` 调整（`0` = 关闭）
 
 * **新作业通知**：发现新作业时发 Windows 系统通知，点击直达该课程的雨课堂页面
+
+* **课表**：可从正方教务一键导入，也可手工增删改或从 CSV/TSV 模板导入；「我的一天」顶部显示今天的课
+
+* **数据备份**：设置 → 关于可导出/恢复数据 zip；数据版本高于程序时自动进入只读，避免降级覆盖
 
 * **桌面小组件**：仿滴答清单的桌面挂件，半透明玻璃面板、可拖动、可缩放，位置与尺寸自动记忆，浅色/深色跟随主程序
 
@@ -106,7 +120,7 @@
 
 | 位置                                               | 内容                                                                                                         |
 | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| `%LOCALAPPDATA%\HomeworkReminder\`               | `session.json`（雨课堂登录态，DPAPI 加密）、`chaoxing-session.json`（学习通登录态）、`pigai-session.json`（批改网登录态，同样 DPAPI 加密）、`local-state.json`（本地勾选/已读）、`settings.json`（壁纸/透明度/主题等设置）、`todos.json`（待办缓存，各来源的作业都在里面）、`startup.log`（启动日志） |
+| `%LOCALAPPDATA%\HomeworkReminder\`               | `session.json`（雨课堂登录态，DPAPI 加密）、`chaoxing-session.json`（学习通登录态）、`pigai-session.json`（批改网登录态，同样 DPAPI 加密）、`local-state.json`（本地勾选/已读/星标/我的一天）、`manual-todos.json`（自建待办）、`reminder-state.json`（提醒去重状态）、`settings.json`（壁纸/透明度/主题/提醒等设置）、`todos.json`（待办缓存，各来源的作业都在里面）、`schedule.json`（课表）、`startup.log`（启动日志） |
 | exe 旁边的 `HomeworkReminder.Desktop.exe.WebView2\` | 登录页浏览器内核的缓存（WebView2 默认行为）                                                                                 |
 
 数据目录可用环境变量 `HOMEWORKREMINDER_DATA_DIR` 覆盖。
@@ -192,10 +206,10 @@ $env:GITHUB_TOKEN='<GitHub 令牌>'; $env:GITEA_TOKEN='<Gitea 令牌>'
 
 | 资产 | 作用 |
 |---|---|
-| `HomeworkReminder-<tag>-win-x64.zip` | 更新包，**内含单个 exe**（trim 模式，约 17 MB） |
+| `UniversityTodos-<tag>-win-x64.zip` | 更新包，**内含单个 exe**（trim 模式，约 40 MB） |
 | `update-manifest.json` | 更新清单：确切文件名 + SHA256 + 大小（含 android 字段） |
 
-Android APK（`HomeworkReminder-<tag>-android.apk`）也放在同一个 release，
+Android APK（`UniversityTodos-<tag>-android.apk`）也放在同一个 release，
 但**不参与更新链路**——客户端自动更新只针对桌面端。
 
 > 打包需要联网还原：自包含发布依赖 runtime pack，而仓库根的 `NuGet.Config`
@@ -297,8 +311,15 @@ docs/                             接口实测文档与调研记录
 dotnet run --project tools\SyncSmoke         # 无界面跑一遍真实同步，打印待办结果
 ```
 
-> 本仓库默认离线还原配置（`NuGet.Config` 指向仓库内 `packages/`）。在可联网的
-> 机器上可删除 `NuGet.Config`、`packages/`、`.nuget-packages/`，直接 `dotnet restore`。
+> 本仓库默认离线还原配置（`NuGet.Config` 指向仓库内 `packages/`，包缓存固定在
+> `.nuget-packages/`）。在可联网的机器上可删除 `NuGet.Config`、`packages/`、
+> `.nuget-packages/`，并去掉 `Directory.Build.props` 里的 `RestorePackagesPath`，
+> 再直接 `dotnet restore`。
+>
+> 固定缓存目录是为了压过本机的用户级环境变量 `NUGET_PACKAGES`（它优先级高于
+> `NuGet.Config`）：如果该变量指向一个不完整的缓存，IDE 里直接构建会报
+> `NU1101: 找不到包 Avalonia...`，而命令行 `tools/build.ps1` 又能正常构建。
+> `RestorePackagesPath` 是 MSBuild 属性，优先级最高，IDE / CLI / 脚本统一走仓库缓存。
 
 ## 已知限制
 

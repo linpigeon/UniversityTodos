@@ -383,32 +383,46 @@ public static class ZhengfangParser
 
         var lines = text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
         var current = new List<string>();
-        var trailing = 0;
 
         foreach (var line in lines)
         {
-            current.Add(line);
-            if (trailing > 0)
+            // 一门课的行序是「课程名 → 周次（可能含节次）→ 地点 → 教师…」。
+            // 所以「当前块已完整（含地点）时又遇到周次行」说明这是**下一门课**的周次，
+            // 而上一行（刚加入 current 的课程名）属于新块，必须一起搬过去。
+            //
+            // 原有实现是在这里「把紧随的一行并入上一块」，结果正好晚了一门课：
+            // 第二门的课名/周次/地点被并进第一块（第一门课显示成第二门的节次），
+            // 第二块只剩教师行 → 第二门课整门被丢弃。真实教务课表里
+            // 「同一格、单双周两门课」很常见，这种切法会静默少吃一门课。
+            if (line.Contains('周') && ParseWeekRange(line).Count > 0
+                && current.Count > 0 && current.Any(LooksLikeLocation))
             {
-                trailing--;
-                if (trailing == 0)
+                var courseName = current[^1];
+                if (IsCourseNameLine(courseName))
                 {
-                    blocks.Add(current);
-                    current = [];
+                    current.RemoveAt(current.Count - 1);
+                    if (current.Count > 0) blocks.Add(current);
+                    current = [courseName];
                 }
-                continue;
             }
 
-            // 周次行 + 当前块已完整（含地点）→ 在这里切开，并把紧随的一行（地点）并入上一块。
-            // 未完整时不切：那一行多半是附加信息（学时/学分/学号）而不是新的一门课。
-            if (line.Contains('周') && ParseWeekRange(line).Count > 0 && current.Any(LooksLikeLocation))
-            {
-                trailing = 1;
-            }
+            current.Add(line);
         }
+
         if (current.Count > 0) blocks.Add(current);
         return blocks;
     }
+
+    /// <summary>
+    /// 该行是否像「课程名」（而不是周次/节次/地点/纯数字等附加行）。
+    /// 仅用于定位「一格多门课」的切分点，判定从严。
+    /// </summary>
+    private static bool IsCourseNameLine(string line) =>
+        line.Length > 0
+        && ParseWeekRange(line).Count == 0
+        && ParsePeriodLabel(line) is null
+        && !LooksLikeLocation(line)
+        && !line.All(char.IsAsciiDigit);
 
     /// <summary>单课块 → 条目：首行课程名；含「周」的行为周次；含「节」的行为节次；其余按序为教师、地点。</summary>
     private static (List<ScheduleItem> Items, string Warning) BlockToItems(

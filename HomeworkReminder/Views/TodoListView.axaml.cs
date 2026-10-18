@@ -93,6 +93,41 @@ public partial class TodoListView : UserControl
         }
     }
 
+    private async void OnStarClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is not { } vm) return;
+        try
+        {
+            if (sender is Control { DataContext: TodoItemViewModel item })
+                await vm.ToggleStarAsync(item);
+        }
+        catch (Exception ex)
+        {
+            SidebarView.ReportHandlerFailure(vm, "星标", ex);
+        }
+    }
+
+    private async void OnAddTodoClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is not { } vm) return;
+        try
+        {
+            if (TopLevel.GetTopLevel(this) is not Window owner) return;
+            var draft = await TodoEditorWindow.ShowAsync(owner, null);
+            if (draft is null) return;
+            await vm.AddManualTodoAsync(draft);
+        }
+        catch (Exception ex)
+        {
+            SidebarView.ReportHandlerFailure(vm, "新建待办", ex);
+        }
+    }
+
+    private void OnClearSearchClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is { } vm) vm.SearchText = string.Empty;
+    }
+
     /// <summary>点课程行：选中它，详情栏显示未完成任务点明细。</summary>
     private void OnCourseTapped(object? sender, TappedEventArgs e)
     {

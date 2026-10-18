@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace HomeworkReminder.Models;
 
@@ -12,7 +14,7 @@ public sealed class TodoItem
 
     public required TodoKind Kind { get; init; }
 
-    public required string Title { get; init; }
+    public required string Title { get; set; }
 
     /// <summary>课程名（雨课堂的 classroom name，可能含多个班级）。</summary>
     public string CourseName { get; init; } = string.Empty;
@@ -66,6 +68,45 @@ public sealed class TodoItem
 
     /// <summary>雨课堂站内的原始链接，便于跳回原页面。增量校验路径会按新日志重建，故可写。</summary>
     public string? SourceUrl { get; set; }
+
+    /// <summary>自建事项的优先级（平台事项恒为 Normal）。</summary>
+    public TodoPriority Priority { get; set; } = TodoPriority.Normal;
+
+    /// <summary>自建事项的标签（平台事项为空）。</summary>
+    public List<string> Tags { get; set; } = [];
+
+    /// <summary>自建事项的备注（平台事项为空）。</summary>
+    public string? Note { get; set; }
+
+    /// <summary>
+    /// 自建事项的显式提醒时间；命中后不再按「提前量」重复提醒。
+    /// 平台事项为 null，走统一的截止前提醒。
+    /// </summary>
+    public DateTimeOffset? RemindAt { get; set; }
+
+    /// <summary>
+    /// 来源（由稳定 Id 前缀 / 种类推导，不参与序列化）。
+    /// <para>不单独落盘：旧缓存没有这个字段，推导能保证它们也能正确显示来源。</para>
+    /// </summary>
+    [JsonIgnore]
+    public TodoSource Source =>
+        Kind == TodoKind.Custom ? TodoSource.Manual
+        : Id.StartsWith("hw-cx-", StringComparison.Ordinal) ? TodoSource.Chaoxing
+        : Id.StartsWith("hw-pg-", StringComparison.Ordinal) ? TodoSource.Pigai
+        : TodoSource.Ykt;
+
+    /// <summary>是否为用户自建事项（可编辑/删除）。</summary>
+    [JsonIgnore]
+    public bool IsManual => Kind == TodoKind.Custom;
+
+    /// <summary>优先级的展示文本。</summary>
+    [JsonIgnore]
+    public string PriorityText => Priority switch
+    {
+        TodoPriority.High => "高优先级",
+        TodoPriority.Low => "低优先级",
+        _ => "普通",
+    };
 
     /// <summary>应用内的已读状态（雨课堂单条已读没有服务端接口，仅 user_read_all 可反写）。</summary>
     public bool IsRead { get; set; }

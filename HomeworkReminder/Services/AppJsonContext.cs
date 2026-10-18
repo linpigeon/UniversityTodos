@@ -54,6 +54,8 @@ namespace HomeworkReminder.Services;
 [JsonSerializable(typeof(LocalState))]
 [JsonSerializable(typeof(AppSettings))]
 [JsonSerializable(typeof(TodoCacheFile))]
+[JsonSerializable(typeof(ManualTodoFile))]
+[JsonSerializable(typeof(ReminderState))]
 // ---- 更新检查与更新包 ----
 [JsonSerializable(typeof(ReleaseInfo))]
 // 用「列出 release」接口（/releases/latest 不返回 assets，拿不到下载地址）。

@@ -136,7 +136,27 @@ public sealed class SyncService(IYktApi api) : ISyncService
         {
             warnings.Add($"没有找到 {api.Session.Term} 学期的课程（接口共返回 {allCourses.Count} 门）。" +
                          "如果课程确实存在，可能是学期标识需要调整，或课程已被归档。");
-            return new SyncResult { CourseCount = 0, Warnings = warnings, CourseSignatures = signatures };
+
+            // **不能用空结果覆盖缓存**：接口抖动、学期标识暂时对不上时，
+            // 空结果会让用户瞬间丢掉全部待办（下次启动也只剩空缓存）。
+            // 保留上一轮的列表与签名，等下次同步纠正。
+            return new SyncResult
+            {
+                Homework = previous is null ? [] : YktOnly(previous.Homework),
+                HomeworkForCache = previous is null ? [] : YktOnly(previous.Homework),
+                Announcements = previous?.Announcements ?? [],
+                CourseCount = 0,
+                ActivityCount = 0,
+                UnreadNotificationCount = previous?.UnreadNotificationCount ?? 0,
+                Warnings = warnings,
+                CourseSignatures = previous is null
+                    ? signatures
+                    : new Dictionary<long, string>(previous.CourseSignatures),
+                CourseFullSyncedAt = previous is null
+                    ? []
+                    : new Dictionary<long, DateTimeOffset>(previous.CourseFullSyncedAt),
+                ArchivedCourses = archivedInTerm,
+            };
         }
 
         // 全量校验时间戳从上次缓存继承：只有走全量路径的课程才刷新它；
@@ -168,6 +188,16 @@ public sealed class SyncService(IYktApi api) : ISyncService
             catch (YktApiException ex)
             {
                 warnings.Add($"{Trim(course.Name)}：学习日志读取失败（{ex.Message}）");
+
+                // 本次读不到不等于这些作业消失了：把上一轮缓存里**本课**的作业原样带进结果，
+                // 否则一次超时/500 就会让这门课的作业从列表与 todos.json 一起消失，
+                // 直到下一次该课成功同步（自动同步默认 30 分钟）。
+                // 不写签名 → 下次同步仍会走全量，不会把缺失当成「没变化」。
+                if (previous is not null)
+                {
+                    homework.AddRange(previous.Homework.Where(
+                        h => h.ClassroomId == course.ClassroomId && IsYktItem(h)));
+                }
                 continue;
             }
 
@@ -263,6 +293,7 @@ public sealed class SyncService(IYktApi api) : ISyncService
             // 拿它去查会得到 "Objects does not exist."，用它当 leaf_schedules 的键
             // 则一律查不到 → 完成状态全部退化成「未知」）。
             Dictionary<string, YktLeafInfo> tree = new(StringComparer.Ordinal);
+            var chaptersOk = true;
             try
             {
                 var chapters = await api.GetChaptersAsync(course.ClassroomId, ct).ConfigureAwait(false);
@@ -277,6 +308,7 @@ public sealed class SyncService(IYktApi api) : ISyncService
             }
             catch (YktApiException ex)
             {
+                chaptersOk = false;
                 warnings.Add($"{Trim(course.Name)}：章节树读取失败，截止时间与完成状态可能缺失（{ex.Message}）");
             }
 
@@ -344,7 +376,11 @@ public sealed class SyncService(IYktApi api) : ISyncService
 
             // 这门课走了全量路径（章节树 + 逐条详情）：记录时间戳。
             // 增量路径不触碰它，24h 全量校验才真的会周期触发。
-            fullSyncedAt[course.ClassroomId] = DateTimeOffset.Now;
+            //
+            // **章节树失败时不能记录**：试卷类作业（type=5）的截止时间只来自章节树，
+            // 记了时间戳意味着接下来 24 小时都走增量、不会再拉树，这门考试会一整天
+            // 没有截止时间（用户也就收不到截止提醒）。留空 → 下次同步重新全量。
+            if (chaptersOk) fullSyncedAt[course.ClassroomId] = DateTimeOffset.Now;
         }
 
         // 未读总数仅用于展示角标，失败不影响主流程。
@@ -514,6 +550,20 @@ public sealed class SyncService(IYktApi api) : ISyncService
     }
 
     private static string Trim(string name) => name.Length <= 18 ? name : name[..18] + "…";
+
+    /// <summary>
+    /// 缓存里属于雨课堂的作业。
+    /// <para>
+    /// 旧版本曾把学习通/批改网条目也写进 <c>TodoCacheFile.Homework</c>，
+    /// 而这两路本来就有各自的缓存字段。回填旧缓存时必须排除，否则会把它们
+    /// 重复带进本次结果（冷启动首屏出现两份的同一个根因）。
+    /// </para>
+    /// </summary>
+    private static List<TodoItem> YktOnly(IEnumerable<TodoItem> items) => items.Where(IsYktItem).ToList();
+
+    private static bool IsYktItem(TodoItem item) =>
+        !item.Id.StartsWith("hw-cx-", StringComparison.Ordinal)
+        && !item.Id.StartsWith("hw-pg-", StringComparison.Ordinal);
 
     /// <summary>
     /// 标题归一化，用于日志与章节树的匹配。

@@ -11,7 +11,7 @@
         Width="1180" Height="760"
         MinWidth="960" MinHeight="580"
         WindowStartupLocation="CenterScreen"
-        Title="作业提醒 · 长江雨课堂"
+        Title="大学事项综合待办"
         TransparencyLevelHint="AcrylicBlur"
         TransparencyBackgroundFallback="#FAF9F8"
         Background="Transparent">

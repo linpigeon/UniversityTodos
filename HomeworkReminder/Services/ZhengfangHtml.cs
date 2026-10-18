@@ -108,19 +108,31 @@ public static partial class ZhengfangHtml
             if (body.StartsWith("#x", StringComparison.OrdinalIgnoreCase))
             {
                 return int.TryParse(body.AsSpan(2), System.Globalization.NumberStyles.HexNumber, null, out var hex)
-                    && hex is >= 0 and <= 0x10FFFF
+                    && IsValidCodePoint(hex)
                     ? char.ConvertFromUtf32(hex)
                     : m.Value;
             }
             if (body.StartsWith('#'))
             {
-                return int.TryParse(body.AsSpan(1), out var dec) && dec is >= 0 and <= 0x10FFFF
+                return int.TryParse(body.AsSpan(1), out var dec) && IsValidCodePoint(dec)
                     ? char.ConvertFromUtf32(dec)
                     : m.Value;
             }
             return NamedEntities.TryGetValue(body, out var named) ? named : m.Value;
         });
     }
+
+    /// <summary>
+    /// 数字实体的码点是否可安全交给 <see cref="char.ConvertFromUtf32"/>。
+    /// <para>
+    /// 必须排除 UTF-16 代理区 <c>0xD800–0xDFFF</c>：页面里若出现
+    /// <c>&amp;#55357;</c>/<c>&amp;#xD83D;</c> 这类「代理项实体」（有些站点把 emoji
+    /// 拆成两个代理项分别转义），<c>ConvertFromUtf32</c> 会抛
+    /// <see cref="ArgumentOutOfRangeException"/>，整个课表导入以英文异常失败。
+    /// </para>
+    /// </summary>
+    private static bool IsValidCodePoint(int code) =>
+        code is >= 0 and <= 0x10FFFF && code is not (>= 0xD800 and <= 0xDFFF);
 
     /// <summary>
     /// 去标签 + 实体解转义 + 行内空白归一。

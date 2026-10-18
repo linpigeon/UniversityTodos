@@ -18,6 +18,8 @@ public enum UpdateApplyBlock
     DevelopmentMode,
     /// <summary>拿不到自身 exe 路径。</summary>
     UnknownExecutable,
+    /// <summary>安装目录不可写（Program Files / 权限 / 杀软保护）。</summary>
+    TargetNotWritable,
     /// <summary>找不到释放出来的替换脚本。</summary>
     ScriptUnavailable,
     /// <summary>启动替换进程失败。</summary>
@@ -145,6 +147,15 @@ public static class UpdateApplier
                 "找不到已解出的新版本文件，请重新下载。");
         }
 
+        // 目标目录不可写时**必须在退出前就拒绝**：否则应用按 Ready 退出、替换器
+        // 重试 20 次后失败，只在临时目录留一行日志，用户看到的是程序凭空消失。
+        if (!DirectoryWritable(Path.GetDirectoryName(target)!))
+        {
+            return new UpdateApplyPlan(false, UpdateApplyBlock.TargetNotWritable,
+                "安装目录不可写（可能位于 Program Files，或受权限/杀毒软件保护）。"
+                + "自动更新无法进行：请把程序放到用户目录，或以管理员身份手动替换。");
+        }
+
         string scriptPath;
         try
         {
@@ -156,15 +167,11 @@ public static class UpdateApplier
                 $"无法释放替换脚本：{ex.Message}");
         }
 
-        // 重启时要转发的命令行参数（去掉本程序自己加的自检参数）。
-        // 写进文件而不是走命令行：PowerShell 从命令行绑定 string[] 参数时，
-        // `-RestartArgs a b` 只会把 a 绑给参数、b 变成无法识别的位置参数，
-        // 脚本会直接报错退出（实测）。用文件传递彻底规避这个绑定规则，
-        // 而且参数里带空格、引号、& 都不会出问题。
-        var keepArgs = Environment.GetCommandLineArgs()
-            .Skip(1)
-            .Where(a => !a.StartsWith("--selfcheck", StringComparison.OrdinalIgnoreCase))
-            .ToArray();
+        // 重启时要转发的命令行参数。
+        // **本程序没有面向用户的启动参数**：全部是诊断/自检用的，其中
+        // --pigaitest / --pigailogin 还带整条 cookie / 密码。这些绝不能写进
+        // restart-args.txt，更不能转发给新进程（原先只过滤了 --selfcheck）。
+        var keepArgs = Array.Empty<string>();
 
         var args = new List<string>
         {
@@ -194,7 +201,9 @@ public static class UpdateApplier
         {
             var psi = new ProcessStartInfo
             {
-                FileName = "powershell.exe",
+                // 用绝对路径：Windows 的搜索顺序会先找应用目录/当前目录，
+                // 便携版放在可写目录时可能被同名 powershell.exe 劫持。
+                FileName = ResolveWindowsPowerShell(),
                 UseShellExecute = false,
                 CreateNoWindow = true,
             };
@@ -211,6 +220,37 @@ public static class UpdateApplier
         return new UpdateApplyPlan(true, UpdateApplyBlock.None,
             "更新已就绪，应用即将退出并完成替换，随后会自动重新启动。",
             scriptPath, target, newExePath);
+    }
+
+    /// <summary>
+    /// 目录是否可写：实际建一个探针文件再删掉。
+    /// <para>比 <c>File.Exists</c> 靠谱：Program Files 下文件存在但没有写权限。</para>
+    /// </summary>
+    private static bool DirectoryWritable(string directory)
+    {
+        try
+        {
+            var probe = Path.Combine(directory, $".hr-write-{Guid.NewGuid():N}.tmp");
+            using (File.Create(probe)) { }
+            File.Delete(probe);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>取系统自带的 Windows PowerShell 绝对路径（找不到则回落到 PATH 查找）。</summary>
+    private static string ResolveWindowsPowerShell()
+    {
+        var system = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        if (!string.IsNullOrWhiteSpace(system))
+        {
+            var full = Path.Combine(system, "WindowsPowerShell", "v1.0", "powershell.exe");
+            if (File.Exists(full)) return full;
+        }
+        return "powershell.exe";
     }
 
     /// <summary>

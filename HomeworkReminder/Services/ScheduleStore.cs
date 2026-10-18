@@ -12,6 +12,9 @@ namespace HomeworkReminder.Services;
 /// <summary>课表文件（schedule.json）的整体结构。</summary>
 public sealed class ScheduleFile
 {
+    /// <summary>数据格式版本；高于程序支持版本时进入只读（见 <see cref="DataCompatibility"/>）。</summary>
+    public int SchemaVersion { get; set; } = DataCompatibility.CurrentSchemaVersion;
+
     public List<ScheduleItem> Items { get; set; } = [];
 
     /// <summary>节次时间表。为空/非法时整体回退 <see cref="Timetable.DefaultPeriods"/>。</summary>
@@ -64,6 +67,7 @@ public sealed class ScheduleStore : IScheduleStore
             var text = await File.ReadAllTextAsync(_path, ct).ConfigureAwait(false);
             var file = JsonSerializer.Deserialize(text, AppJsonContext.Default.ScheduleFile);
             if (file is null) return NewFile();
+            DataCompatibility.Observe(file.SchemaVersion, _path);
 
             file.Items = Validate(file.Items);
             file.Periods = Timetable.NormalizePeriods(file.Periods);
@@ -78,6 +82,7 @@ public sealed class ScheduleStore : IScheduleStore
 
     public async Task SaveAsync(ScheduleFile file, CancellationToken ct = default)
     {
+        if (DataCompatibility.IsReadOnly) return;
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
         var json = JsonSerializer.Serialize(file, AppJsonContext.Default.ScheduleFile);
 

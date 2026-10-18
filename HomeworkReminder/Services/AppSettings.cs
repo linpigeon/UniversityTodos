@@ -12,6 +12,9 @@ namespace HomeworkReminder.Services;
 /// </summary>
 public sealed class AppSettings
 {
+    /// <summary>数据格式版本；高于程序支持版本时进入只读（见 <see cref="DataCompatibility"/>）。</summary>
+    public int SchemaVersion { get; set; } = DataCompatibility.CurrentSchemaVersion;
+
     /// <summary>所属高校 id。长江雨课堂为 3214。</summary>
     public int UniversityId { get; set; } = 3214;
 
@@ -62,6 +65,42 @@ public sealed class AppSettings
 
     /// <summary>发现新作业时是否发系统通知。</summary>
     public bool NotifyOnNewHomework { get; set; } = true;
+
+    /// <summary>是否在截止前发「即将截止」提醒。</summary>
+    public bool NotifyDueSoon { get; set; } = true;
+
+    /// <summary>临近截止提醒的提前量（分钟）。</summary>
+    public int DueSoonMinutes { get; set; } = DefaultDueSoonMinutes;
+
+    /// <summary>默认提前 60 分钟提醒即将截止。</summary>
+    public const int DefaultDueSoonMinutes = 60;
+
+    /// <summary>临近截止提醒的下限（分钟）。</summary>
+    public const int MinDueSoonMinutes = 5;
+
+    /// <summary>临近截止提醒的上限（分钟）。</summary>
+    public const int MaxDueSoonMinutes = 24 * 60;
+
+    /// <summary>临近截止提前量归一化：越界一律夹回合法区间。</summary>
+    public static int NormalizeDueSoonMinutes(int minutes) =>
+        Math.Clamp(minutes, MinDueSoonMinutes, MaxDueSoonMinutes);
+
+    /// <summary>是否每天发一条逾期汇总。</summary>
+    public bool NotifyOverdue { get; set; } = true;
+
+    /// <summary>逾期汇总的发送时刻（<c>HH:mm</c>）；过了这个点当天才发。</summary>
+    public string OverdueDigestTime { get; set; } = "08:00";
+
+    /// <summary>汇总时刻是否合法（<c>HH:mm</c>，24 小时制）。</summary>
+    public static bool IsValidDigestTime(string? value) =>
+        value is { Length: 5 } && value[2] == ':'
+        && char.IsAsciiDigit(value[0]) && char.IsAsciiDigit(value[1])
+        && char.IsAsciiDigit(value[3]) && char.IsAsciiDigit(value[4])
+        && (value[0] - '0') * 10 + (value[1] - '0') < 24
+        && (value[3] - '0') * 10 + (value[4] - '0') < 60;
+
+    /// <summary>是否随系统开机自动启动（仅 Windows 安装/便携版生效）。</summary>
+    public bool LaunchAtLogin { get; set; }
 
     /// <summary>
     /// 上课前多少分钟发提醒。<c>0</c> = 不提醒。
@@ -136,7 +175,9 @@ public sealed class AppSettings
         {
             if (!File.Exists(Location)) return new AppSettings();
             var text = File.ReadAllText(Location);
-            return JsonSerializer.Deserialize(text, AppJsonContext.Default.AppSettings) ?? new AppSettings();
+            var settings = JsonSerializer.Deserialize(text, AppJsonContext.Default.AppSettings) ?? new AppSettings();
+            DataCompatibility.Observe(settings.SchemaVersion, Location);
+            return settings;
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
@@ -162,6 +203,9 @@ public sealed class AppSettings
     /// <summary>写回磁盘。主题/透明度由界面防抖后调用，壁纸与小组件开关直接调用。</summary>
     public void Save()
     {
+        // 只读保护：见到过更新版本的数据文件时，绝不用当前结构覆盖它。
+        if (DataCompatibility.IsReadOnly) return;
+
         var json = JsonSerializer.Serialize(this, AppJsonContext.Default.AppSettings);
         lock (SaveLock)
         {

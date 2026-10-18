@@ -23,17 +23,28 @@ public interface ILocalStateStore
 
 public sealed class LocalState
 {
+    /// <summary>数据格式版本；高于程序支持版本时进入只读（见 <see cref="DataCompatibility"/>）。</summary>
+    public int SchemaVersion { get; set; } = DataCompatibility.CurrentSchemaVersion;
+
     /// <summary>在应用里被勾掉的事项 id。</summary>
     public HashSet<string> Done { get; set; } = [];
 
     /// <summary>在应用里标记为已读的公告 id。</summary>
     public HashSet<string> ReadAnnouncements { get; set; } = [];
-}
 
+    /// <summary>星标的事项 id（本地标记，不影响平台数据）。</summary>
+    public HashSet<string> Starred { get; set; } = [];
+
+    /// <summary>被用户手动加入「我的一天」的事项 id。</summary>
+    public HashSet<string> InMyDay { get; set; } = [];
+}
 /// <inheritdoc />
 public sealed class LocalStateStore : ILocalStateStore
 {
     private readonly string _path;
+
+    /// <summary>同一文件的写入串行化（UI 勾选与「全部已读」可能几乎同时发生）。</summary>
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
 
     public LocalStateStore(string? directory = null)
     {
@@ -47,7 +58,9 @@ public sealed class LocalStateStore : ILocalStateStore
         try
         {
             var text = await File.ReadAllTextAsync(_path, ct).ConfigureAwait(false);
-            return JsonSerializer.Deserialize(text, AppJsonContext.Default.LocalState) ?? new LocalState();
+            var state = JsonSerializer.Deserialize(text, AppJsonContext.Default.LocalState) ?? new LocalState();
+            DataCompatibility.Observe(state.SchemaVersion, _path);
+            return state;
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
@@ -57,15 +70,27 @@ public sealed class LocalStateStore : ILocalStateStore
 
     public async Task SaveAsync(LocalState state, CancellationToken ct = default)
     {
+        if (DataCompatibility.IsReadOnly) return;
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            await File.WriteAllTextAsync(
-                _path,
-                JsonSerializer.Serialize(state, AppJsonContext.Default.LocalState),
-                ct).ConfigureAwait(false);
+            var json = JsonSerializer.Serialize(state, AppJsonContext.Default.LocalState);
+
+            // 先写临时文件再原子替换：直接覆盖时若进程被杀/断电，会留下半截 JSON，
+            // 下次 LoadAsync 按「损坏」返回空状态 —— 用户的全部勾选与已读会一次性丢失。
+            await _writeGate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var tmp = _path + ".tmp";
+                await File.WriteAllTextAsync(tmp, json, ct).ConfigureAwait(false);
+                File.Move(tmp, _path, overwrite: true);
+            }
+            finally
+            {
+                _writeGate.Release();
+            }
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // 本地状态写不进去不影响本次会话的使用。
         }

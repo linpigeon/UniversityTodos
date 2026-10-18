@@ -174,6 +174,20 @@
                          Text="最小化到托盘时窗口收起、托盘保留图标，自动同步与新作业提醒照常进行。" />
             </StackPanel>
 
+            <!-- 开机自启（仅桌面 Windows） -->
+            <StackPanel Spacing="12" IsVisible="{Binding ShowDesktopSettings}">
+              <TextBlock Text="启动" FontSize="14" FontWeight="SemiBold"
+                         Foreground="{DynamicResource TodoTextPrimary}" />
+              <ToggleSwitch Content="随 Windows 登录自动启动"
+                            OnContent="开" OffContent="关"
+                            IsChecked="{Binding LaunchAtLogin, Mode=TwoWay}"
+                            FontSize="13"
+                            Foreground="{DynamicResource TodoTextSecondary}" />
+              <TextBlock FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoTextTertiary}"
+                         Text="写入当前用户的启动项（不需要管理员权限）；换目录后启动时会自动改写为新路径。" />
+            </StackPanel>
+
             <!-- 桌面小组件（仅桌面） -->
             <StackPanel Spacing="12" IsVisible="{Binding ShowDesktopSettings}">
               <TextBlock Text="桌面小组件" FontSize="14" FontWeight="SemiBold"
@@ -194,6 +208,44 @@
                             IsChecked="{Binding NotifyOnNewHomework, Mode=TwoWay}"
                             FontSize="13"
                             Foreground="{DynamicResource TodoTextSecondary}" />
+
+              <!-- 截止提醒：与「新作业」分开开关，不想被打扰的用户可以只留一种 -->
+              <ToggleSwitch Content="截止前提醒（临近截止）"
+                            OnContent="开" OffContent="关"
+                            IsChecked="{Binding NotifyDueSoon, Mode=TwoWay}"
+                            FontSize="13"
+                            Foreground="{DynamicResource TodoTextSecondary}" />
+              <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12"
+                    IsVisible="{Binding NotifyDueSoon}">
+                <TextBlock Grid.Column="0" Text="提前量" FontSize="13" VerticalAlignment="Center"
+                           Foreground="{DynamicResource TodoTextSecondary}" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                  <NumericUpDown Minimum="5" Maximum="1440" FormatString="0" Width="130"
+                                 Value="{Binding DueSoonMinutes, Mode=TwoWay}" />
+                  <TextBlock Text="分钟" FontSize="12" VerticalAlignment="Center"
+                             Foreground="{DynamicResource TodoTextTertiary}" />
+                </StackPanel>
+              </Grid>
+              <TextBlock FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoTextTertiary}"
+                         Text="在事项截止前多少分钟提醒；同一事项的同一个截止时间只提醒一次，改期后会重新提醒。" />
+
+              <ToggleSwitch Content="每日逾期汇总"
+                            OnContent="开" OffContent="关"
+                            IsChecked="{Binding NotifyOverdue, Mode=TwoWay}"
+                            FontSize="13"
+                            Foreground="{DynamicResource TodoTextSecondary}" />
+              <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12"
+                    IsVisible="{Binding NotifyOverdue}">
+                <TextBlock Grid.Column="0" Text="汇总时间" FontSize="13" VerticalAlignment="Center"
+                           Foreground="{DynamicResource TodoTextSecondary}" />
+                <TextBox Grid.Column="1" Width="100" HorizontalAlignment="Left"
+                         Text="{Binding OverdueDigestTime, Mode=TwoWay}"
+                         PlaceholderText="08:00" />
+              </Grid>
+              <TextBlock FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoTextTertiary}"
+                         Text="每天过了这个时间，若存在已逾期事项，发一条汇总通知（每天最多一条）。上课提醒在上面的「同步」里单独设置。" />
             </StackPanel>
 
           </StackPanel>
@@ -318,6 +370,17 @@
           <StackPanel HorizontalAlignment="Left" Spacing="22"
                       MaxWidth="{Binding Bounds.Width, ElementName=TimetableTabScroller}">
 
+            <!-- 课程条目 -->
+            <StackPanel Spacing="10">
+              <TextBlock Text="课程条目" FontSize="14" FontWeight="SemiBold"
+                         Foreground="{DynamicResource TodoTextPrimary}" />
+              <TextBlock FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoTextTertiary}"
+                         Text="手工增删改课程，或从 CSV / TSV 模板批量导入。教务导入只支持正方系统；换学校或页面改版时，至少还能用这份表格维护课表。" />
+              <Button Classes="outline" Content="管理课程…" Padding="10,5" FontSize="12"
+                      HorizontalAlignment="Left" Click="OnManageScheduleClick" />
+            </StackPanel>
+
             <!-- 节次时间表 -->
             <StackPanel Spacing="10">
               <TextBlock Text="节次时间表" FontSize="14" FontWeight="SemiBold"
@@ -394,7 +457,7 @@
             <!-- 应用信息 -->
             <StackPanel Spacing="12">
               <StackPanel Spacing="2">
-                <TextBlock Text="作业提醒 · 长江雨课堂" FontSize="15" FontWeight="SemiBold"
+                <TextBlock Text="大学事项综合待办" FontSize="15" FontWeight="SemiBold"
                            Foreground="{DynamicResource TodoTextPrimary}" />
                 <TextBlock Text="{Binding AppVersionText, StringFormat='版本 {0}'}" FontSize="12"
                            Foreground="{DynamicResource TodoTextTertiary}" />
@@ -429,6 +492,21 @@
               <TextBlock Text="{Binding UpdateStatus}" FontSize="11" TextWrapping="Wrap"
                          Foreground="{DynamicResource TodoTextTertiary}"
                          IsVisible="{Binding UpdateStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            </StackPanel>
+
+            <!-- 数据备份（便携程序，数据只在本机） -->
+            <StackPanel Spacing="8">
+              <TextBlock Text="数据" FontSize="14" FontWeight="SemiBold"
+                         Foreground="{DynamicResource TodoTextPrimary}" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes="outline" Content="导出数据备份…" Padding="10,5" FontSize="12"
+                        Click="OnExportBackupClick" />
+                <Button Classes="outline" Content="从备份恢复…" Padding="10,5" FontSize="12"
+                        Click="OnRestoreBackupClick" />
+              </StackPanel>
+              <TextBlock FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoTextTertiary}"
+                         Text="备份包含设置、登录态、待办缓存、自建待办、课表与本地标记。登录态是 DPAPI 密文，只能在同一台机器的同一 Windows 用户下恢复；换机后需要重新登录。" />
             </StackPanel>
 
             <!-- 当前状态（原侧边栏底部的登录/同步信息） -->

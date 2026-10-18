@@ -316,23 +316,40 @@ public sealed partial class TimetableViewModels : ViewModelBase
     private int _lastMaxUsedPeriod;
 
     /// <summary>用指定周次的条目重建网格。</summary>
+    /// <param name="estimatedAnchor">
+    /// 未设置学期第一周时，是否按「本周为第 1 周」估算出日期用于预览。
+    /// 估算只影响显示：<see cref="HasTermAnchor"/> 仍为 false，界面会保留提示。
+    /// </param>
     public void Rebuild(
         IReadOnlyList<ScheduleItem> items,
         int weekNumber,
         string? termStartDate,
         IReadOnlyList<PeriodSlot> periods,
-        bool darkTheme)
+        bool darkTheme,
+        bool estimatedAnchor = false)
     {
         IsDarkTheme = darkTheme;
 
         var weekStart = Services.Timetable.WeekStartDate(termStartDate, weekNumber);
-        HasTermAnchor = weekStart is not null;
-        IsCurrentWeekDisplayed =
-            Services.Timetable.ComputeWeekNumber(TodayDate, termStartDate) is { } todayWeek
-            && todayWeek == weekNumber;
+        var hasRealAnchor = weekStart is not null;
+
+        if (weekStart is null && estimatedAnchor && weekNumber >= 1)
+        {
+            var today = Services.Timetable.ParseDate(TodayDate)
+                        ?? DateOnly.FromDateTime(DateTime.Now);
+            weekStart = Services.Timetable.MondayOf(today).AddDays((weekNumber - 1) * 7);
+        }
+
+        HasTermAnchor = hasRealAnchor;
+        IsCurrentWeekDisplayed = hasRealAnchor
+            ? Services.Timetable.ComputeWeekNumber(TodayDate, termStartDate) is { } todayWeek
+              && todayWeek == weekNumber
+            : estimatedAnchor;
 
         WeekLabel = weekStart is { } s
-            ? $"第 {weekNumber} 周 · {s:MM-dd} ~ {s.AddDays(6):MM-dd}"
+            ? hasRealAnchor
+                ? $"第 {weekNumber} 周 · {s:MM-dd} ~ {s.AddDays(6):MM-dd}"
+                : $"第 {weekNumber} 周 · 估算 {s:MM-dd} ~ {s.AddDays(6):MM-dd}（未设置学期第一周）"
             : $"第 {weekNumber} 周（未设置学期第一周，暂不显示日期）";
 
         // 本周真正要上的课（含单双周判定）——决定课块是否弱化。

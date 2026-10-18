@@ -79,9 +79,17 @@ public static class PigaiLoginService
     public static async Task<string?> TryProbeAsync(NativeWebView webView, CancellationToken ct = default)
     {
         var script = InvokeScriptAsync(webView);
+        var delay = Task.Delay(ProbeTimeout, ct);
 
-        var finished = await Task.WhenAny(script, Task.Delay(ProbeTimeout, ct)).ConfigureAwait(true);
-        if (!ReferenceEquals(finished, script)) return null;
+        var finished = await Task.WhenAny(script, delay).ConfigureAwait(true);
+        if (!ReferenceEquals(finished, script))
+        {
+            script.Observe();
+            return null;
+        }
+
+        // 计时器抢输后仍会继续跑；登录页关闭时 ct 取消它，不观察会变成未观察异常。
+        delay.Observe();
 
         var raw = await script.ConfigureAwait(true);
         var code = raw?.Trim().Trim('"');

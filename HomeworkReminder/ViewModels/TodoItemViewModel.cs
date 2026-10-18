@@ -39,6 +39,57 @@ public partial class TodoItemViewModel(TodoItem model) : ViewModelBase
     [ObservableProperty]
     private bool _isSelected;
 
+    /// <summary>星标（本地标记）。</summary>
+    [ObservableProperty]
+    private bool _isStarred;
+
+    /// <summary>是否被用户手动加入「我的一天」。</summary>
+    [ObservableProperty]
+    private bool _inMyDay;
+
+    partial void OnIsStarredChanged(bool value)
+    {
+        OnPropertyChanged(nameof(StarGlyph));
+        OnPropertyChanged(nameof(StarTooltip));
+        OnPropertyChanged(nameof(StarButtonText));
+    }
+
+    /// <summary>列表行上的星标字形（只有星标时显示）。</summary>
+    public string StarGlyph => "\uF005";
+
+    public string StarTooltip => IsStarred ? "取消星标" : "星标";
+
+    public string StarButtonText => IsStarred ? "取消星标" : "星标";
+
+    public string MyDayTooltip => InMyDay ? "移出我的一天" : "加入我的一天";
+
+    public string MyDayButtonText => InMyDay ? "移出我的一天" : "加入我的一天";
+
+    partial void OnInMyDayChanged(bool value)
+    {
+        OnPropertyChanged(nameof(MyDayTooltip));
+        OnPropertyChanged(nameof(MyDayButtonText));
+    }
+
+    /// <summary>是否为用户自建事项（可编辑/删除）。</summary>
+    public bool IsManual => Model.IsManual;
+
+    /// <summary>优先级展示（自建事项才显示）。</summary>
+    public string PriorityText => Model.PriorityText;
+
+    public bool ShowPriority => IsManual && Model.Priority != TodoPriority.Normal;
+
+    public bool HasNote => !string.IsNullOrWhiteSpace(Model.Note);
+
+    public string NoteText => Model.Note ?? string.Empty;
+
+    public bool HasTags => Model.Tags.Count > 0;
+
+    public string TagsText => HasTags ? "# " + string.Join("  # ", Model.Tags) : string.Empty;
+
+    /// <summary>优先级为高的事项在列表里标一个点。</summary>
+    public bool IsHighPriority => Model.Priority == TodoPriority.High;
+
     public string Id => Model.Id;
     public TodoKind Kind => Model.Kind;
     public string Title => Model.Title;
@@ -48,8 +99,18 @@ public partial class TodoItemViewModel(TodoItem model) : ViewModelBase
     public string DisplayTitle => DisplayText.StripTermPrefix(Model.Title);
 
     /// <summary>展示用学科名：优先 courses/list 内嵌 course.name（如「概率论与数理统计B」），
-    /// 旧缓存没有时退回剥离学期前缀的班级名。</summary>
-    public string DisplaySubject => Model.Subject ?? DisplayText.StripTermPrefix(Model.CourseName);
+    /// 旧缓存没有时退回剥离学期前缀的班级名。自建事项没有课程，统一显示「自建待办」。</summary>
+    public string DisplaySubject => IsManual
+        ? "自建待办"
+        : Model.Subject ?? DisplayText.StripTermPrefix(Model.CourseName);
+
+    /// <summary>
+    /// 列表/详情的主标题。平台事项显示学科（列表按课程归集），自建事项显示任务标题本身。
+    /// </summary>
+    public string HeaderPrimary => IsManual ? DisplayText.StripTermPrefix(Model.Title) : DisplaySubject;
+
+    /// <summary>列表/详情的副标题（自建事项标注来源）。</summary>
+    public string HeaderSecondary => IsManual ? "自建待办" : DisplayTitle;
 
     /// <summary>展示用课程名：剥离学期前缀。</summary>
     public string CourseDisplayName => DisplayText.StripTermPrefix(Model.CourseName);
@@ -73,7 +134,15 @@ public partial class TodoItemViewModel(TodoItem model) : ViewModelBase
     public bool ShowRemainingOverdue => ShowRemaining && IsOverdue;
 
     /// <summary>试卷类作业在标题上带「作业」字样，用它选图标。</summary>
-    public string Glyph => Kind == TodoKind.Announcement ? "\uF0A1" : "\uF19D";
+    public string Glyph => Kind switch
+    {
+        TodoKind.Announcement => "\uF0A1",
+        TodoKind.Custom => "\uF304",
+        _ => "\uF19D",
+    };
+
+    /// <summary>自建事项没有平台页面可打开。</summary>
+    public bool ShowOpenButton => !IsManual;
 
     /// <summary>未开始 vs 进行中，用于列表里的进度徽标着色。</summary>
     public bool ShowProgress => Kind == TodoKind.Homework && Model.Total is > 0;

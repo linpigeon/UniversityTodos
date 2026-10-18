@@ -38,6 +38,7 @@ public sealed class ClassReminderService : IDisposable
     private readonly Func<ScheduleFile> _schedule;
     private readonly Func<string?> _termStartDate;
     private readonly Func<int> _minutesBefore;
+    private readonly Func<int> _term;
     private readonly INotifier _notifier;
     private readonly Action<string>? _log;
     private readonly Func<DateTime> _now;
@@ -55,7 +56,8 @@ public sealed class ClassReminderService : IDisposable
         Func<int> minutesBefore,
         INotifier notifier,
         Action<string>? log = null,
-        Func<DateTime>? now = null)
+        Func<DateTime>? now = null,
+        Func<int>? term = null)
     {
         _schedule = schedule;
         _termStartDate = termStartDate;
@@ -63,6 +65,8 @@ public sealed class ClassReminderService : IDisposable
         _notifier = notifier;
         _log = log;
         _now = now ?? (() => DateTime.Now);
+        // 学期用于过滤课表条目；未注入时按「不筛」（0）处理，兼容旧调用与测试。
+        _term = term ?? (() => 0);
     }
 
     /// <summary>是否有轮询在跑。</summary>
@@ -159,8 +163,11 @@ public sealed class ClassReminderService : IDisposable
         }
 
         var now = _now();
+        // 只取本学期的课：ScheduleMerge 从不删除，换学期后旧条目仍在文件里，
+        // 不筛就会拿旧课在新学期的日期上继续提醒。
+        var items = Timetable.ForTerm(file.Items, _term());
         var sessions = Timetable.Expand(
-            file.Items, termStart, file.Periods,
+            items, termStart, file.Periods,
             fromDate: now.ToString("yyyy-MM-dd"), days: 1);
 
         List<Timetable.ClassReminder> due;

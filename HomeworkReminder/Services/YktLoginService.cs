@@ -207,9 +207,20 @@ public sealed class YktLoginService
     public static async Task<string?> TryProbeAsync(NativeWebView webView, CancellationToken ct = default)
     {
         var script = InvokeScriptAsync(webView);
+        var delay = Task.Delay(ProbeTimeout, ct);
 
-        var finished = await Task.WhenAny(script, Task.Delay(ProbeTimeout, ct)).ConfigureAwait(true);
-        if (!ReferenceEquals(finished, script)) return null;
+        var finished = await Task.WhenAny(script, delay).ConfigureAwait(true);
+        if (!ReferenceEquals(finished, script))
+        {
+            // 脚本没赢：它内部已把异常吞成 null，但仍要标记为已观察，
+            // 否则页面跳转导致的取消会在 GC 时变成「UNOBSERVED TASK」。
+            script.Observe();
+            return null;
+        }
+
+        // 脚本赢了：3 秒计时器还在跑，登录页关闭时 ct 会取消它——
+        // 不观察就会在调试器里报「A task was canceled.」。
+        delay.Observe();
 
         try
         {

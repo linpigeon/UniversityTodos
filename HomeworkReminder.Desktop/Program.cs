@@ -85,7 +85,7 @@ sealed class Program
         var jwCheckIndex = Array.IndexOf(args, "--jwcheck");
 
         Log($"=== start {DateTimeOffset.Now:O} (selfcheck={selfCheckIndex >= 0}) ===");
-        Log($"args       : [{string.Join(", ", args)}]");
+        Log($"args       : [{RedactArgs(args)}]");
         Log($"exe        : {Environment.ProcessPath}");
         Log($"data dir   : {AppPaths.DataDirectory}");
         Log($"OS         : {RuntimeInformation.OSDescription}");
@@ -1325,5 +1325,39 @@ sealed class Program
         {
             // 日志本身失败不应影响启动。
         }
+    }
+
+    /// <summary>
+    /// 诊断日志用的参数脱敏。
+    /// <para>
+    /// <c>--pigailogin</c> 紧跟「账号 密码」，<c>--pigaitest</c> 紧跟整条 cookie。
+    /// 这两条命令的存在意义就是把凭据读进内存、不落盘；而启动日志会把完整命令行
+    /// 追加到 <c>startup.log</c>，等于把它们明文持久化（README 里正是这么用的）。
+    /// </para>
+    /// </summary>
+    private static string RedactArgs(IReadOnlyList<string> args)
+    {
+        var values = new List<string>(args.Count);
+        for (var i = 0; i < args.Count; i++)
+        {
+            values.Add(args[i]);
+
+            if (string.Equals(args[i], "--pigailogin", StringComparison.Ordinal))
+            {
+                // 账号与密码（两个值）都要打码，账号同样不该落盘。
+                for (var k = 0; k < 2 && i + 1 < args.Count; k++)
+                {
+                    values.Add("***");
+                    i++;
+                }
+            }
+            else if (string.Equals(args[i], "--pigaitest", StringComparison.Ordinal)
+                     && i + 1 < args.Count)
+            {
+                values.Add("***");
+                i++;
+            }
+        }
+        return string.Join(", ", values);
     }
 }
