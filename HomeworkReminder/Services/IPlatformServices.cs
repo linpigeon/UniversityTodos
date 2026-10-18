@@ -59,6 +59,11 @@ public interface IPlatformServices
     bool SupportsAutoLaunch => false;
 
     /// <summary>
+    /// 在系统文件管理器中打开一个目录。默认空实现：移动端没有「打开文件夹」。
+    /// </summary>
+    void OpenFolder(string path) { }
+
+    /// <summary>
     /// 设置/取消开机自启。返回 null 表示成功，否则是给用户看的原因。
     /// <para>默认空实现：不支持该能力的平台不应被调用（调用方先看 <see cref="SupportsAutoLaunch"/>）。</para>
     /// </summary>

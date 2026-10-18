@@ -2254,6 +2254,17 @@ public sealed partial class MainViewModel : ViewModelBase
     /// <summary>当前版本号（设置页「关于」显示）。</summary>
     public string AppVersionText => $"v{UpdateService.CurrentVersion}";
 
+    /// <summary>当前数据目录（安装版为「安装目录\Data」，兼容模式为 %LOCALAPPDATA%\HomeworkReminder）。</summary>
+    public string DataDirectoryText => AppPaths.DataDirectory;
+
+    /// <summary>数据存放模式说明，迁移时用来确认装的是哪种模式。</summary>
+    public string DataStorageModeText => AppPaths.IsPortable
+        ? "安装/便携模式：数据与 WebView2 缓存都在程序目录下（Data / Cache）。"
+        : "兼容模式：数据仍在上一个版本的用户目录（exe 旁没有 portable.flag）。";
+
+    /// <summary>在资源管理器中打开数据目录（设置页「关于」使用）。</summary>
+    public void OpenDataDirectory() => PlatformServices?.OpenFolder(AppPaths.DataDirectory);
+
     [ObservableProperty]
     private bool _isCheckingUpdate;
 

@@ -11,7 +11,7 @@
       不再手写常量：
         - 原先 ApplicationVersion 恒为 1，所有版本在安装器/商店眼里都是同一个版本；
         - ApplicationDisplayVersion 手写 1.4.2，发版时容易与 <Version> 漂移。
-      1.4.3 → versionCode 10403。
+      1.4.4 → versionCode 10404。
     -->
     <ApplicationVersion>$([MSBuild]::Add($([MSBuild]::Add($([MSBuild]::Multiply($([System.Version]::Parse('$(Version)').Major), 10000)), $([MSBuild]::Multiply($([System.Version]::Parse('$(Version)').Minor), 100)))), $([System.Version]::Parse('$(Version)').Build)))</ApplicationVersion>
     <ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>

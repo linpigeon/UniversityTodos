@@ -503,7 +503,13 @@
                         Click="OnExportBackupClick" />
                 <Button Classes="outline" Content="从备份恢复…" Padding="10,5" FontSize="12"
                         Click="OnRestoreBackupClick" />
+                <Button Classes="outline" Content="打开数据目录" Padding="10,5" FontSize="12"
+                        Click="OnOpenDataDirectoryClick" />
               </StackPanel>
+              <TextBlock Text="{Binding DataStorageModeText}" FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoTextSecondary}" />
+              <TextBlock Text="{Binding DataDirectoryText}" FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoTextTertiary}" />
               <TextBlock FontSize="11" TextWrapping="Wrap"
                          Foreground="{DynamicResource TodoTextTertiary}"
                          Text="备份包含设置、登录态、待办缓存、自建待办、课表与本地标记。登录态是 DPAPI 密文，只能在同一台机器的同一 Windows 用户下恢复；换机后需要重新登录。" />

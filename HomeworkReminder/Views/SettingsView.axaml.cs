@@ -195,6 +195,11 @@ public partial class SettingsView : UserControl
         Vm?.OpenUpdatePage();
     }
 
+    private void OnOpenDataDirectoryClick(object? sender, RoutedEventArgs e)
+    {
+        Vm?.OpenDataDirectory();
+    }
+
     private void OnShowSettingsTabClick(object? sender, RoutedEventArgs e)
     {
         Vm?.ShowSettingsTab(0);

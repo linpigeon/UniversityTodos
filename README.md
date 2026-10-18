@@ -4,8 +4,8 @@
 的作业、考试与公告，再加上课表与自建事项，以仿 Microsoft To Do 的 Fluent 界面呈现。
 
 > 仓库：GitHub `linpigeon/UniversityTodos` · Gitea `lin/UniversityTodos`。
-> 代码标识（程序集名、命名空间、数据目录、Android 包名）仍沿用 `HomeworkReminder`，
-> 以便老用户的本地数据与自动更新不中断。
+> 代码标识（程序集名、命名空间、Android 包名）仍沿用 `HomeworkReminder`，
+> 以便老用户的本地数据与自动更新不中断；安装版的数据目录改为安装目录下的 `Data`（见下文）。
 
 ![界面](docs/screenshots/app-main.png)
 
@@ -44,6 +44,24 @@
 * **数据备份**：设置 → 关于可导出/恢复数据 zip；数据版本高于程序时自动进入只读，避免降级覆盖
 
 * **桌面小组件**：仿滴答清单的桌面挂件，半透明玻璃面板、可拖动、可缩放，位置与尺寸自动记忆，浅色/深色跟随主程序
+
+## 安装（推荐）
+
+从 release 下载 `UniversityTodos-<tag>-Setup.exe` 双击安装：
+
+- 默认安装到 `%LOCALAPPDATA%\Programs\大学事项综合待办`（**按用户安装，不需要管理员权限**），
+  向导里可以改到其它可写目录。
+- 自动创建**桌面快捷方式**与开始菜单项（含卸载入口），并写入「设置 → 应用」的卸载信息。
+- 安装版把**程序、数据、缓存**都收在安装目录下：
+  - `<安装目录>\Data`：设置、登录态、待办缓存、自建待办、提醒状态、课表；
+  - `<安装目录>\Cache\WebView2`：登录页浏览器缓存；
+  - `portable.flag`：安装模式标记。删掉它，应用会回到兼容模式
+    （数据在 `%LOCALAPPDATA%\HomeworkReminder`）。
+- 安装向导检测到旧版数据时可勾选「迁移旧数据」；卸载默认**保留** `Data`。
+- 安装包未做代码签名，Windows SmartScreen 可能提示，选择「更多信息 → 仍要运行」即可。
+
+> 从旧版**自动更新**（zip）过来的用户不会切到安装模式：exe 旁没有 `portable.flag`，
+> 仍使用原来的 `%LOCALAPPDATA%\HomeworkReminder`，不需要迁移。
 
 ## 快速开始
 
@@ -118,12 +136,56 @@
 
 ## 数据存放
 
-| 位置                                               | 内容                                                                                                         |
-| ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| `%LOCALAPPDATA%\HomeworkReminder\`               | `session.json`（雨课堂登录态，DPAPI 加密）、`chaoxing-session.json`（学习通登录态）、`pigai-session.json`（批改网登录态，同样 DPAPI 加密）、`local-state.json`（本地勾选/已读/星标/我的一天）、`manual-todos.json`（自建待办）、`reminder-state.json`（提醒去重状态）、`settings.json`（壁纸/透明度/主题/提醒等设置）、`todos.json`（待办缓存，各来源的作业都在里面）、`schedule.json`（课表）、`startup.log`（启动日志） |
-| exe 旁边的 `HomeworkReminder.Desktop.exe.WebView2\` | 登录页浏览器内核的缓存（WebView2 默认行为）                                                                                 |
+应用有两种数据模式，**看 exe 同目录有没有 `portable.flag`**：
 
-数据目录可用环境变量 `HOMEWORKREMINDER_DATA_DIR` 覆盖。
+| 模式 | 数据 / 缓存位置 | 适用 |
+|---|---|---|
+| **安装/便携模式**（有 `portable.flag`） | `<安装目录>\Data\` 存全部 JSON；`<安装目录>\Cache\WebView2\` 存 WebView2 缓存 | 安装包安装；或手动在 exe 旁建 `portable.flag` |
+| **兼容模式**（没有标记） | `%LOCALAPPDATA%\HomeworkReminder\` 存全部 JSON；WebView2 缓存在 exe 旁边 | 旧版自动更新、直接解压 zip |
+
+`Data` / 用户目录里的文件：
+
+| 文件 | 内容 |
+|---|---|
+| `session.json` | 雨课堂登录态（DPAPI 加密） |
+| `chaoxing-session.json` | 学习通登录态 |
+| `pigai-session.json` | 批改网登录态（同样 DPAPI 加密） |
+| `local-state.json` | 本地勾选 / 已读 / 星标 / 我的一天 |
+| `manual-todos.json` | 自建待办 |
+| `reminder-state.json` | 提醒去重状态 |
+| `settings.json` | 壁纸 / 透明度 / 主题 / 提醒等设置 |
+| `todos.json` | 待办缓存（各来源的作业都在里面） |
+| `schedule.json` | 课表 |
+| `startup.log` | 启动日志 |
+
+数据目录可用环境变量 `HOMEWORKREMINDER_DATA_DIR` 覆盖（优先级最高）。
+
+### 从旧版迁移数据（安装版首次使用）
+
+> 先**退出**旧程序，再复制文件；迁移前建议把 `%LOCALAPPDATA%\HomeworkReminder`
+> 整个目录压缩备份一份。旧目录确认无误前不要删。
+
+**方式一：安装向导自动迁移（推荐）**
+
+1. 运行 `UniversityTodos-<tag>-Setup.exe`；
+2. 安装向导检测到 `%LOCALAPPDATA%\HomeworkReminder` 时，会显示「迁移旧数据」页，保持勾选；
+3. 安装完成后打开应用，到 **设置 → 关于 → 数据**，确认「数据位置」显示
+   `<安装目录>\Data`；
+4. 检查作业/待办/课表/登录态是否齐全；缺什么再从备份补。
+
+**方式二：手动复制（免安装 zip 或想自己控制）**
+
+1. 把 `%LOCALAPPDATA%\HomeworkReminder\*.json` 复制到 `<安装目录>\Data\`
+   （只复制 JSON，不要复制 `startup.log`、`.WebView2` 缓存）；
+2. 确认 `<安装目录>\portable.flag` 存在；没有就新建一个空文件；
+3. 启动应用，按上面的方法核对「数据位置」。
+
+**换机 / 换 Windows 用户时**：`session.json`、`chaoxing-session.json`、`pigai-session.json`
+是 DPAPI 密文，只能在同一台机器的同一 Windows 用户下解密；迁移后如果提示未登录，
+重新扫码/登录一次即可，其余待办与课表不受影响。
+
+**想回到旧位置**：删除 `<安装目录>\portable.flag` 后重启，应用会重新读写
+`%LOCALAPPDATA%\HomeworkReminder`（安装版 `Data` 里的数据会留在原处，可手动合并）。
 
 ## 打包发布
 
@@ -169,24 +231,26 @@
 （桌面与 Android 共同继承，桌面 exe 的版本信息也由它决定）：
 
 ```powershell
-# 1. 改版本号（两处，必须与 tag 一致）
-#    - Directory.Build.props        的 <Version>
-#    - HomeworkReminder.Android/*.csproj 的 <ApplicationDisplayVersion>
-#      （APK 的版本号不走 Directory.Build.props，需单独改，改后要重建 APK）
+# 1. 改版本号（只改一处）
+#    Directory.Build.props 的 <Version>；桌面 exe 与 Android versionCode/Name 都由它推导。
 
-# 2. 一键发布：校验版本一致性 → 打包 → 生成 update-manifest.json → 上传
+# 2. 打包（安装包依赖 publish\trim）
+.\tools\publish.ps1 -Mode trim -NoPdb
+.\tools\build-installer.ps1 -Version 1.4.4
+
+# 3. 一键发布：校验版本一致性 → 打包 → 生成 update-manifest.json → 上传
 $env:GITHUB_TOKEN='<GitHub 令牌>'; $env:GITEA_TOKEN='<Gitea 令牌>'
-.\tools\release.ps1 -Tag v1.4.0 -Upload
-
-# 带 Android APK（历史 release 都带）
-.\tools\release.ps1 -Tag v1.4.0 -Upload `
+.\tools\release.ps1 -Tag v1.4.4 -Upload `
+  -Installer .\publish\UniversityTodos-Setup-1.4.4.exe `
   -AndroidApk .\HomeworkReminder.Android\bin\Release\net10.0-android\com.CompanyName.HomeworkReminder-Signed.apk
 
 # 只校验并打包、不上传
-.\tools\release.ps1 -Tag v1.4.0
+.\tools\release.ps1 -Tag v1.4.4
 
 # 产物已生成、只想重传（例如补权限后）
-.\tools\release.ps1 -Tag v1.4.0 -SkipBuild -Upload
+.\tools\release.ps1 -Tag v1.4.4 -SkipBuild -Upload `
+  -Installer .\publish\UniversityTodos-Setup-1.4.4.exe `
+  -AndroidApk .\HomeworkReminder.Android\bin\Release\net10.0-android\com.CompanyName.HomeworkReminder-Signed.apk
 ```
 
 **版本号必须与 tag 一致**，否则客户端会陷入更新循环（装了新版仍报旧版号，每次检查都提示有更新）。
@@ -206,6 +270,7 @@ $env:GITHUB_TOKEN='<GitHub 令牌>'; $env:GITEA_TOKEN='<Gitea 令牌>'
 
 | 资产 | 作用 |
 |---|---|
+| `UniversityTodos-<tag>-Setup.exe` | Windows 安装包，首次安装用；不参与应用内自动更新 |
 | `UniversityTodos-<tag>-win-x64.zip` | 更新包，**内含单个 exe**（trim 模式，约 18 MB） |
 | `update-manifest.json` | 更新清单：确切文件名 + SHA256 + 大小（含 android 字段） |
 

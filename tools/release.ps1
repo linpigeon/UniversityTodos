@@ -32,7 +32,10 @@ param(
     # Android APK 路径（可选）。指定后会按 `UniversityTodos-<tag>-android.apk` 归档、
     # 登记进更新清单的 android 字段，并随 -Upload 一起上传到两个源。
     # 历史 release 都带 APK，但客户端自动更新只针对桌面端，APK 不参与更新链路。
-    [string]$AndroidApk = ''
+    [string]$AndroidApk = '',
+    # Windows 安装包路径（可选）。不参与应用内更新链路（客户端仍用 zip），
+    # 只作为 release 里的「首次安装」入口；按 `UniversityTodos-<tag>-Setup.exe` 归档并上传。
+    [string]$Installer = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -163,11 +166,27 @@ if ($AndroidApk) {
 $manifestPath = Join-Path $root 'publish\update-manifest.json'
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
 
+# Windows 安装包（可选）：首次安装用，不进入更新链路。
+$installerPath = $null
+$installerName = $null
+if ($Installer) {
+    if (-not (Test-Path $Installer)) {
+        Write-Host "== 指定的安装包不存在：$Installer ==" -ForegroundColor Red
+        exit 1
+    }
+    $installerName = "UniversityTodos-$Tag-Setup.exe"
+    $installerPath = Join-Path $root "publish\$installerName"
+    Copy-Item $Installer $installerPath -Force
+}
+
 Write-Host ''
 Write-Host '== 产物 ==' -ForegroundColor Green
 Write-Host "   程序     : $($exeInPkg.FullName) ($([math]::Round($exeInPkg.Length/1MB,1)) MB)"
 Write-Host "   更新包   : $zipPath ($([math]::Round($zipSize/1MB,1)) MB)"
 Write-Host "   SHA256   : $zipHash"
+if ($installerPath) {
+    Write-Host "   安装包   : $installerPath ($([math]::Round((Get-Item $installerPath).Length/1MB,1)) MB)"
+}
 if ($apkPath) {
     Write-Host "   Android  : $apkPath ($([math]::Round((Get-Item $apkPath).Length/1MB,1)) MB)"
 }
@@ -175,6 +194,7 @@ Write-Host "   更新清单 : $manifestPath"
 Write-Host ''
 Write-Host '   请把下面这些文件作为同一个 release 的资产上传：' -ForegroundColor Yellow
 Write-Host "     - $zipName"
+if ($installerName) { Write-Host "     - $installerName" }
 if ($apkName) { Write-Host "     - $apkName" }
 Write-Host "     - update-manifest.json"
 
@@ -237,6 +257,9 @@ $dl.Add('')
 $dl.Add('| 平台 | 文件 | 说明 |')
 $dl.Add('|---|---|---|')
 $dl.Add("| Windows 10/11 x64 | ``UniversityTodos-$Tag-win-x64.zip`` | 内含单个 ``HomeworkReminder.Desktop.exe``（$([math]::Round((Get-Item $zipPath).Length / 1MB, 2)) MB），解压即用，无需安装运行时 |")
+if ($installerPath) {
+    $dl.Add("| Windows 安装版（推荐）| ``UniversityTodos-$Tag-Setup.exe`` | 安装到 ``%LOCALAPPDATA%\Programs\大学事项综合待办``，创建桌面/开始菜单快捷方式；数据与缓存都收在安装目录，可迁移旧数据（$([math]::Round((Get-Item $installerPath).Length / 1MB, 2)) MB） |")
+}
 if ($apkPath) {
     $dl.Add("| Android（API 23+）| ``UniversityTodos-$Tag-android.apk`` | 使用 Android Debug 证书签名（$([math]::Round((Get-Item $apkPath).Length / 1MB, 2)) MB）；切换正式签名需先卸载 |")
 }
@@ -244,6 +267,9 @@ $dl.Add('')
 $dl.Add('| 校验 | 值 |')
 $dl.Add('|---|---|')
 $dl.Add("| zip SHA256 | ``$((Get-FileHash $zipPath -Algorithm SHA256).Hash)`` |")
+if ($installerPath) {
+    $dl.Add("| setup SHA256 | ``$((Get-FileHash $installerPath -Algorithm SHA256).Hash)`` |")
+}
 if ($apkPath) {
     $dl.Add("| apk SHA256 | ``$((Get-FileHash $apkPath -Algorithm SHA256).Hash)`` |")
 }
@@ -305,7 +331,7 @@ if ($env:GITHUB_TOKEN) {
                 -ContentType $jsonUtf8 -Body $body -TimeoutSec 60
         }
 
-        foreach ($asset in (@($zipPath, $manifestPath) + @($apkPath | Where-Object { $_ }))) {
+        foreach ($asset in (@($zipPath, $manifestPath, $installerPath, $apkPath) | Where-Object { $_ })) {
             $name = Split-Path $asset -Leaf
             $existing = $ghRelease.assets | Where-Object { $_.name -eq $name }
             if ($existing) {
@@ -392,7 +418,7 @@ if ($env:GITEA_TOKEN) {
                 -ContentType $jsonUtf8 -Body $body -TimeoutSec 60
         }
 
-        foreach ($asset in (@($zipPath, $manifestPath) + @($apkPath | Where-Object { $_ }))) {
+        foreach ($asset in (@($zipPath, $manifestPath, $installerPath, $apkPath) | Where-Object { $_ })) {
             $name = Split-Path $asset -Leaf
             $existing = $gtRelease.assets | Where-Object { $_.name -eq $name }
             if ($existing) {

@@ -1,4 +1,4 @@
-# 发布日志
+﻿# 发布日志
 
 > **版本基线**：从 **v1.2.0** 起，桌面端与 Android 端首次以同一版本号正式发布。
 > Android 端在 v1.2.0 才真正成形，故不单独发布 v1.1.x 系；`v1.1.1` 的 tag 与 release
@@ -7,6 +7,38 @@
 >
 > 历史版本：v1.2.0（基线，双端）→ v1.1.0（桌面）→ v1.0.0（桌面）。
 
+## v1.4.4（2026-10-18）· 新增 Windows 安装程序；数据与缓存收进安装目录
+
+### 新增
+
+- **Windows 安装程序**：`UniversityTodos-<tag>-Setup.exe`（NSIS，按用户安装）。
+  - 默认安装到 `%LOCALAPPDATA%\Programs\大学事项综合待办`，**不需要管理员权限**。
+  - 自动创建桌面快捷方式与开始菜单项（含卸载入口），写 HKCU 卸载信息。
+  - 安装向导可勾选**迁移旧版数据**：从 `%LOCALAPPDATA%\HomeworkReminder` 复制
+    `*.json` 到新的 `Data` 目录；目标已有 `settings.json` 时不会覆盖。
+  - 卸载默认**保留 Data**（设置/待办/课表/登录态），只有明确选择「不保留」才删除；
+    静默卸载一律保留，避免脚本误删。
+- **安装/便携模式**：exe 旁存在 `portable.flag` 时，数据放 `<程序目录>\Data`，
+  WebView2 缓存放 `<程序目录>\Cache\WebView2`（通过 `WEBVIEW2_USER_DATA_FOLDER`
+  在启动最早阶段设置）。程序、数据、缓存都在同一个安装路径下，备份/迁移/卸载只面对一个目录。
+- **兼容模式不变**：没有 `portable.flag` 时（自动更新过来的老用户、直接解压 zip 的用户）
+  继续使用 `%LOCALAPPDATA%\HomeworkReminder`，数据不迁移也能照常升级。
+- **设置 → 关于 → 数据**：显示当前数据目录与模式（安装版/兼容模式），并新增
+  「打开数据目录」按钮，方便核对迁移结果。
+
+### 构建
+
+- 新增 `installer/UniversityTodos.nsi` 与 `tools/build-installer.ps1`；
+  本机没有 NSIS 时脚本会自动下载 3.11 便携版到 `%TEMP%`，不写系统目录。
+- `tools/release.ps1` 新增 `-Installer`，安装包按 `UniversityTodos-<tag>-Setup.exe`
+  归档、上传并写入 release 下载表；安装包不参与应用内自动更新（客户端仍用 zip）。
+
+### 验证
+
+- 桌面/Android 构建 0 警告 0 错误；`--jsoncheck` 66/66。
+- 安装包静默安装到临时目录：`portable.flag` / `Data` / `Cache` / 快捷方式 / 卸载项齐全；
+  安装后的 exe 实测数据目录为 `<安装目录>\Data`。
+- `--selfcheck` 无绑定/XAML 告警；`--androidcheck` 65 屏 0 缺陷。
 ## v1.4.3（2026-10-18）· 更名为「大学事项综合待办」+ 截止提醒、自建待办、课表管理
 
 > 仓库与发布包同步改名为 **UniversityTodos**。exe 文件名、命名空间、数据目录

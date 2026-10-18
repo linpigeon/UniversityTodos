@@ -25,9 +25,35 @@ sealed class Program
     /// </summary>
     private static string LogPath => Path.Combine(AppPaths.DataDirectory, "startup.log");
 
+    /// <summary>
+    /// 安装/便携模式：把数据与 WebView2 缓存都收在程序目录下。
+    /// 非便携模式什么都不改，沿用 WebView2 默认缓存位置（exe 旁），老用户行为不变。
+    /// </summary>
+    private static void ConfigurePortablePaths()
+    {
+        if (!AppPaths.IsPortable) return;
+
+        try
+        {
+            Directory.CreateDirectory(AppPaths.WebView2UserDataFolder);
+            // WebView2 官方支持的环境变量：在创建 CoreWebView2Environment 前设置即生效。
+            // 这样登录页/教务页的浏览器缓存不会散落到 %LOCALAPPDATA% 或 exe 旁边。
+            Environment.SetEnvironmentVariable(
+                "WEBVIEW2_USER_DATA_FOLDER", AppPaths.WebView2UserDataFolder);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            // 缓存目录建不出来不应该阻止启动；WebView2 会退回默认位置。
+            // 此时日志还没初始化，只能靠启动后「数据位置」排查。
+        }
+    }
+
     [STAThread]
     public static void Main(string[] args)
     {
+        // 必须最早执行：WebView2 在创建环境时才读这个变量，晚于任何 WebView 初始化就没用了。
+        ConfigurePortablePaths();
+
         // 平台服务注入要放在一切模式分支之前：自检/测试模式同样会走到 OpenSource 等调用。
         ViewModels.MainViewModel.PlatformServices = new DesktopPlatformServices();
 

@@ -6,16 +6,41 @@ namespace HomeworkReminder.Services;
 /// <summary>
 /// 应用数据的存放位置。
 /// <para>
-/// 默认在 <c>%LOCALAPPDATA%\HomeworkReminder</c>。可以用环境变量
-/// <c>HOMEWORKREMINDER_DATA_DIR</c> 覆盖——受限环境（例如把应用跑在沙箱里）
-/// 常常不允许写入 AppData，此时退回到临时目录，而不是直接崩溃。
+/// 两种模式：
+/// </para>
+/// <list type="bullet">
+/// <item><b>安装/便携模式</b>：exe 同目录存在 <c>portable.flag</c> 时，数据放
+/// <c>&lt;程序目录&gt;\Data</c>，WebView2 缓存放 <c>&lt;程序目录&gt;\Cache\WebView2</c>。
+/// 安装程序会创建这个标记，从而把数据与缓存都收在同一个安装路径下，卸载/备份都只面对一个目录。</item>
+/// <item><b>兼容模式</b>：没有标记时沿用旧行为 <c>%LOCALAPPDATA%\HomeworkReminder</c>，
+/// 保证自动更新过来的老用户与直接解压 zip 的用户数据不断档。</item>
+/// </list>
+/// <para>
+/// 环境变量 <c>HOMEWORKREMINDER_DATA_DIR</c> 仍然优先级最高——受限环境（沙箱、CI）
+/// 用它把数据指到临时目录。
 /// </para>
 /// </summary>
 public static class AppPaths
 {
     public const string DataDirEnvironmentVariable = "HOMEWORKREMINDER_DATA_DIR";
 
+    /// <summary>便携/安装模式标记文件名（放在 exe 同目录）。</summary>
+    public const string PortableMarkerFileName = "portable.flag";
+
     private static readonly Lazy<string> LazyDataDirectory = new(Resolve);
+
+    /// <summary>程序所在目录（单文件发布时就是 exe 所在目录）。</summary>
+    public static string ApplicationDirectory => AppContext.BaseDirectory;
+
+    /// <summary>是否安装/便携模式（exe 旁有 <see cref="PortableMarkerFileName"/>）。</summary>
+    public static bool IsPortable =>
+        File.Exists(Path.Combine(ApplicationDirectory, PortableMarkerFileName));
+
+    /// <summary>安装/便携模式下的 WebView2 缓存目录。</summary>
+    public static string CacheDirectory => Path.Combine(ApplicationDirectory, "Cache");
+
+    /// <summary>安装/便携模式下 WebView2 的用户数据目录。</summary>
+    public static string WebView2UserDataFolder => Path.Combine(CacheDirectory, "WebView2");
 
     public static string DataDirectory => LazyDataDirectory.Value;
 
@@ -24,6 +49,15 @@ public static class AppPaths
         var overridden = Environment.GetEnvironmentVariable(DataDirEnvironmentVariable);
         if (!string.IsNullOrWhiteSpace(overridden) && TryPrepare(overridden, out var custom))
             return custom;
+
+        // 安装/便携模式：数据与缓存都放在程序目录下。
+        if (IsPortable)
+        {
+            var portable = Path.Combine(ApplicationDirectory, "Data");
+            if (TryPrepare(portable, out var okPortable)) return okPortable;
+            // Data 写不进去（例如装到了 Program Files）就退回旧目录：
+            // 应用仍可用，但设置里的「数据位置」会显示旧路径，便于用户发现装错位置。
+        }
 
         var preferred = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

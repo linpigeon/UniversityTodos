@@ -24,6 +24,20 @@ internal sealed class DesktopPlatformServices : IPlatformServices
         }
     }
 
+    /// <summary>在资源管理器中打开数据目录（目录不存在时不弹错误）。</summary>
+    public void OpenFolder(string path)
+    {
+        try
+        {
+            if (!Directory.Exists(path)) return;
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+        }
+        catch (Exception)
+        {
+            // 打不开目录不影响应用其它功能。
+        }
+    }
+
     /// <summary>
     /// 为安装更新而退出。
     /// <para>
