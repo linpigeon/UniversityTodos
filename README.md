@@ -215,6 +215,7 @@ signtool verify /pa /v publish\UniversityTodos-Setup-1.4.5.exe
 > 注意：签名只能证明「发布者身份」与「文件未被篡改」；**新证书仍需要积累 SmartScreen 声誉**。
 > EV 证书通常能更快建立信任，OV 证书在下载量积累前仍可能被提示。
 > 签完 exe 后要重新打 zip / 安装包，否则发布产物里的 exe 还是未签名的那一份。
+> `release.ps1` 默认会重新 publish；签名版要么复用已签好的 `publish\UniversityTodos-<tag>-win-x64\` 并用 `-SkipBuild`，要么把签名步骤接进脚本。当前 v1.4.5 发布包仍是未签名版本。
 ## 打包发布
 
 ```powershell
