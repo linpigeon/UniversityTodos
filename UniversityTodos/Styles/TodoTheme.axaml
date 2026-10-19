@@ -221,6 +221,14 @@
     <Setter Property="Foreground" Value="{DynamicResource TodoTextPrimary}" />
   </Style>
 
+  <!-- 列表分组标题（贴在每组第一条上方，如「雨课堂 · 3 项」） -->
+  <Style Selector="TextBlock.groupHeader">
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TodoTextTertiary}" />
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+
   <Style Selector="TextBlock.paneTitle">
     <Setter Property="FontSize" Value="15" />
     <Setter Property="FontWeight" Value="SemiBold" />

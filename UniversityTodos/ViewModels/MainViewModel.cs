@@ -133,7 +133,7 @@ public sealed partial class MainViewModel : ViewModelBase
         NavItems =
         [
             new NavItem("myday", "我的一天", "\uF185", "今天到期与已过期的事项"),
-            new NavItem("planned", "计划内", "\uF133", "所有有截止时间的事项，按时间排序"),
+            new NavItem("planned", "计划内", "\uF133", "所有有截止时间的事项，可按来源/课程分组并按时间或优先级排序"),
             // 图标：方框加一支笔（勾作业的意象）。**不能与「课程」同图标**——
             // 两者原先都是 \uF19D（学士帽），侧栏上完全分不出来。
             new NavItem("homework", "作业", "\uF044", "全部作业及其作答进度"),
@@ -165,6 +165,8 @@ public sealed partial class MainViewModel : ViewModelBase
         var settings = AppSettings.Current;
         _themeModeIndex = settings.ThemeModeIndex;
         _wallpaperOpacityPercent = settings.WallpaperOpacityPercent;
+        _listGroupModeIndex = AppSettings.NormalizeListGroupMode(settings.ListGroupModeIndex);
+        _listSortModeIndex = AppSettings.NormalizeListSortMode(settings.ListSortModeIndex);
         ApplyTheme();
         LoadWallpaper(settings.WallpaperPath);
 
@@ -594,6 +596,14 @@ public sealed partial class MainViewModel : ViewModelBase
     public IReadOnlyList<NavItem> NavItems { get; }
 
     public TodoListViewModel List { get; } = new();
+
+    /// <summary>「计划内 / 作业」的分组方式：0 不分组，1 按来源，2 按课程（持久化在 settings.json）。</summary>
+    [ObservableProperty]
+    private int _listGroupModeIndex;
+
+    /// <summary>「计划内 / 作业」的排序方式：0 按时间，1 按优先级（持久化在 settings.json）。</summary>
+    [ObservableProperty]
+    private int _listSortModeIndex;
 
     /// <summary>
     /// 把 <see cref="List"/> 上会影响 <see cref="CanShowCourseDetail"/> 的变化转发上来。
@@ -1457,6 +1467,8 @@ public sealed partial class MainViewModel : ViewModelBase
             var count = List.Count;
             var overdue = List.OverdueCount;
             var headText = $"{count} 项";
+            if (ShowListLayoutControls && ListGroupModeIndex is 1 or 2)
+                headText += ListGroupModeIndex == 1 ? " · 按来源分组" : " · 按课程分组";
             if (SelectedNav?.Key == "myday")
                 return overdue > 0 ? $"{headText} · 其中 {overdue} 项已过期" : headText;
             if (SelectedNav?.Key == "announcement")
@@ -1469,6 +1481,12 @@ public sealed partial class MainViewModel : ViewModelBase
     /// 是否显示「隐藏已勾选」开关（仅作业/全部视图有意义）。
     /// </summary>
     public bool ShowHideDoneToggle => SelectedNav?.Key is "homework" or "all" or "planned" or "myday";
+
+    /// <summary>
+    /// 是否显示「分组 / 排序」两个下拉框。只在计划内与作业视图出现：
+    /// 其他视图的排序口径是固定的（如公告按未读、已完成按时间倒序），不该让用户改。
+    /// </summary>
+    public bool ShowListLayoutControls => SelectedNav?.Key is "planned" or "homework";
 
     /// <summary>
     /// 是否显示课程详情面板。
@@ -3184,14 +3202,10 @@ public sealed partial class MainViewModel : ViewModelBase
                 .OrderByDescending(i => i.InMyDay)
                 .ThenBy(i => i.Model.EffectiveDueAt ?? DateTimeOffset.MaxValue),
 
-            "planned" => source
-                .Where(i => i.Model.EffectiveDueAt is not null && !i.IsCompletedOnServer)
-                .OrderBy(i => i.Model.EffectiveDueAt),
+            "planned" => OrderPlanned(
+                source.Where(i => i.Model.EffectiveDueAt is not null && !i.IsCompletedOnServer)),
 
-            "homework" => source
-                .Where(i => i.Kind == TodoKind.Homework)
-                .OrderBy(i => i.Model.Status == TodoStatus.Completed ? 1 : 0)
-                .ThenBy(i => i.Model.EffectiveDueAt ?? DateTimeOffset.MaxValue),
+            "homework" => OrderHomework(source.Where(i => i.Kind == TodoKind.Homework)),
 
             "announcement" => source
                 .Where(i => i.Kind == TodoKind.Announcement)
@@ -3235,8 +3249,39 @@ public sealed partial class MainViewModel : ViewModelBase
         // 视图据此在「待办列表」与「课程列表」之间切换。
         List.ShowCourseList = isCourseView;
 
+        // 分组只对「计划内 / 作业」开放；其他视图忽略持久化的设置。
+        List.GroupMode = ShowListLayoutControls
+            ? (TodoGroupMode)Math.Clamp(ListGroupModeIndex, 0, 2)
+            : TodoGroupMode.None;
+
         List.Replace(query);
         OnPropertyChanged(nameof(ListSubtitle));
+    }
+
+    /// <summary>
+    /// 「计划内」排序：按时间升序，或按优先级降序；另一维作为并列时的次序。
+    /// 自建事项才有手动优先级，平台事项恒为普通。
+    /// </summary>
+    private IEnumerable<TodoItemViewModel> OrderPlanned(IEnumerable<TodoItemViewModel> items)
+    {
+        return ListSortModeIndex == 1
+            ? items.OrderByDescending(i => (int)i.Model.Priority)
+                   .ThenBy(i => i.Model.EffectiveDueAt ?? DateTimeOffset.MaxValue)
+            : items.OrderBy(i => i.Model.EffectiveDueAt)
+                   .ThenByDescending(i => (int)i.Model.Priority);
+    }
+
+    /// <summary>
+    /// 「作业」排序：已完成的永远排在后面（与原先口径一致），未完成内部再按时间或优先级排。
+    /// 平台作业没有手动优先级（恒为 Normal），所以「按优先级」在这里会退化为按截止时间。
+    /// </summary>
+    private IEnumerable<TodoItemViewModel> OrderHomework(IEnumerable<TodoItemViewModel> items)
+    {
+        var byStatus = items.OrderBy(i => i.Model.Status == TodoStatus.Completed ? 1 : 0);
+        return ListSortModeIndex == 1
+            ? byStatus.ThenByDescending(i => (int)i.Model.Priority)
+                      .ThenBy(i => i.Model.EffectiveDueAt ?? DateTimeOffset.MaxValue)
+            : byStatus.ThenBy(i => i.Model.EffectiveDueAt ?? DateTimeOffset.MaxValue);
     }
 
     // ---------------- 交互 ----------------
@@ -3263,6 +3308,7 @@ public sealed partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(ListTitle));
         OnPropertyChanged(nameof(ListSubtitle));
         OnPropertyChanged(nameof(ShowHideDoneToggle));
+        OnPropertyChanged(nameof(ShowListLayoutControls));
         OnPropertyChanged(nameof(ShowTodayClasses));
     }
 
@@ -3310,6 +3356,34 @@ public sealed partial class MainViewModel : ViewModelBase
     // 注意：这里刻意不监听 SelectedNav 的变化。导航状态由视图在点击时统一调用
     // OnNavChanged 刷新，避免「绑定写入 + 显式调用」导致同一套派生逻辑跑两遍。
 
+
+    partial void OnListGroupModeIndexChanged(int value)
+    {
+        var normalized = AppSettings.NormalizeListGroupMode(value);
+        if (normalized != value)
+        {
+            ListGroupModeIndex = normalized;
+            return;
+        }
+
+        AppSettings.Current.ListGroupModeIndex = normalized;
+        AppSettings.Current.Save();
+        ApplyFilter();
+    }
+
+    partial void OnListSortModeIndexChanged(int value)
+    {
+        var normalized = AppSettings.NormalizeListSortMode(value);
+        if (normalized != value)
+        {
+            ListSortModeIndex = normalized;
+            return;
+        }
+
+        AppSettings.Current.ListSortModeIndex = normalized;
+        AppSettings.Current.Save();
+        ApplyFilter();
+    }
 
     partial void OnSelectedItemChanged(TodoItemViewModel? value)
     {

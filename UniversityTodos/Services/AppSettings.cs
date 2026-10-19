@@ -49,6 +49,20 @@ public sealed class AppSettings
     /// <summary>桌面三栏：待办列表栏宽度（DIP）。详情栏吃剩余空间，无需记忆。</summary>
     public double ListWidth { get; set; } = 400;
 
+    // ---------------- 列表视图偏好 ----------------
+
+    /// <summary>「计划内 / 作业」的分组方式：0 = 不分组，1 = 按来源，2 = 按课程。</summary>
+    public int ListGroupModeIndex { get; set; }
+
+    /// <summary>「计划内 / 作业」的排序方式：0 = 按时间，1 = 按优先级。</summary>
+    public int ListSortModeIndex { get; set; }
+
+    /// <summary>分组方式归一化：手改 settings.json 写出越界值时夹回合法区间。</summary>
+    public static int NormalizeListGroupMode(int value) => Math.Clamp(value, 0, 2);
+
+    /// <summary>排序方式归一化。</summary>
+    public static int NormalizeListSortMode(int value) => Math.Clamp(value, 0, 1);
+
     // ---------------- 自动同步与通知 ----------------
 
     /// <summary>

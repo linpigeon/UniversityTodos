@@ -2482,6 +2482,16 @@ public static class JsonSelfTest
                 "汇总时刻校验不符");
         });
 
+        Check("列表分组/排序设置：默认值与归一化", () =>
+        {
+            var defaults = new AppSettings();
+            Assert(defaults.ListGroupModeIndex == 0 && defaults.ListSortModeIndex == 0,
+                "默认应为「不分组 + 按时间」");
+            Assert(AppSettings.NormalizeListGroupMode(-1) == 0, "分组索引下界应夹到 0");
+            Assert(AppSettings.NormalizeListGroupMode(9) == 2, "分组索引上界应夹到 2");
+            Assert(AppSettings.NormalizeListSortMode(9) == 1, "排序索引上界应夹到 1");
+        });
+
         Check("上课提醒：前提提示（有课表就不能说「还没有课表」）", () =>
         {
             // 回归：启动时课表是异步读盘的，而提示原先在启动读盘那条路径上**忘了刷新**，

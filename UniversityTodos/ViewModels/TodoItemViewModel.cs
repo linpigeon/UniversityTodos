@@ -39,6 +39,20 @@ public partial class TodoItemViewModel(TodoItem model) : ViewModelBase
     [ObservableProperty]
     private bool _isSelected;
 
+    /// <summary>
+    /// 这一条是否是当前分组的首行（分组标题画在它上面）。
+    /// <para>
+    /// 分组刻意不产生额外的行对象：标题贴在每组第一条上，勾选、选中与键盘导航仍然只面对真实条目。
+    /// 由 <see cref="TodoListViewModel.Rebuild"/> 在每次重排后重新标记。
+    /// </para>
+    /// </summary>
+    [ObservableProperty]
+    private bool _isGroupStart;
+
+    /// <summary>分组标题（如「雨课堂 · 3 项」）；非首行为空字符串。</summary>
+    [ObservableProperty]
+    private string _groupLabel = string.Empty;
+
     /// <summary>星标（本地标记）。</summary>
     [ObservableProperty]
     private bool _isStarred;

@@ -29,6 +29,19 @@ public sealed partial class NavItem(string key, string label, string glyph, stri
     partial void OnBadgeTextChanged(string value) => OnPropertyChanged(nameof(HasBadge));
 }
 
+/// <summary>「计划内 / 作业」列表的分组方式。</summary>
+public enum TodoGroupMode
+{
+    /// <summary>平铺（默认）。</summary>
+    None = 0,
+
+    /// <summary>按来源：雨课堂 / 学习通 / 批改网 / 自建。</summary>
+    Source = 1,
+
+    /// <summary>按课程：学科名；自建事项归到「自建待办」。</summary>
+    Course = 2,
+}
+
 /// <summary>
 /// 中间栏的待办列表：持有一个过滤器下的全部事项，并派生计数。
 /// </summary>
@@ -37,6 +50,15 @@ public sealed partial class TodoListViewModel : ViewModelBase
     public ObservableCollection<TodoItemViewModel> Items { get; } = [];
 
     public ObservableCollection<TodoItemViewModel> VisibleItems { get; } = [];
+
+    /// <summary>
+    /// 当前分组方式（仅计划内 / 作业使用；其他视图由 MainViewModel 强制 None）。
+    /// <para>
+    /// 改这个属性本身不触发重排——调用方先设它再 <see cref="Replace"/>，
+    /// 避免一次筛选触发两遍布局。
+    /// </para>
+    /// </summary>
+    public TodoGroupMode GroupMode { get; set; } = TodoGroupMode.None;
 
     /// <summary>
     /// 「课程」视图的条目（学习通课程维度的任务点汇总）。
@@ -128,8 +150,46 @@ public sealed partial class TodoListViewModel : ViewModelBase
         if (HideLocallyDone)
             query = query.Where(i => i.Kind != TodoKind.Homework || !i.IsDone);
 
+        var visible = query.ToList();
+
+        // 条目是复用的：每次重排先清掉上一次的分组标记，避免旧标题留到新位置。
+        foreach (var i in Items)
+        {
+            i.IsGroupStart = false;
+            i.GroupLabel = string.Empty;
+        }
+
         VisibleItems.Clear();
-        foreach (var i in query) VisibleItems.Add(i);
+        if (GroupMode == TodoGroupMode.None || visible.Count == 0)
+        {
+            foreach (var i in visible) VisibleItems.Add(i);
+        }
+        else
+        {
+            // 组顺序 = 组内第一条在排序结果里的位置：按时间排时「最近截止的组」在前，
+            // 按优先级排时「优先级最高的组」在前；组内保持 MainViewModel 给的顺序。
+            var groups = visible
+                .Select((item, index) => (item, index))
+                .GroupBy(x => GroupKey(x.item), StringComparer.CurrentCulture)
+                .OrderBy(g => g.Min(x => x.index));
+
+            foreach (var group in groups)
+            {
+                var members = group.Select(x => x.item).ToList();
+                var label = $"{group.Key} · {members.Count} 项";
+
+                for (var index = 0; index < members.Count; index++)
+                {
+                    if (index == 0)
+                    {
+                        members[index].IsGroupStart = true;
+                        members[index].GroupLabel = label;
+                    }
+
+                    VisibleItems.Add(members[index]);
+                }
+            }
+        }
 
         OnPropertyChanged(nameof(Count));
         OnPropertyChanged(nameof(HasItems));
@@ -137,6 +197,22 @@ public sealed partial class TodoListViewModel : ViewModelBase
         OnPropertyChanged(nameof(DueTodayCount));
         OnPropertyChanged(nameof(HasAnyContent));
     }
+
+    /// <summary>分组键：按课程时自建事项统一归到「自建待办」，平台事项用学科名。</summary>
+    private string GroupKey(TodoItemViewModel item) => GroupMode switch
+    {
+        TodoGroupMode.Source => item.Model.Source switch
+        {
+            TodoSource.Chaoxing => "学习通",
+            TodoSource.Pigai => "批改网",
+            TodoSource.Manual => "自建待办",
+            _ => "雨课堂",
+        },
+        TodoGroupMode.Course => item.IsManual
+            ? "自建待办"
+            : (string.IsNullOrWhiteSpace(item.DisplaySubject) ? "未分类课程" : item.DisplaySubject),
+        _ => string.Empty,
+    };
 
     partial void OnHideLocallyDoneChanged(bool value) => Rebuild();
 }

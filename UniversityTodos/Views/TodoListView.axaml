@@ -57,6 +57,27 @@
           </Button>
         </Grid>
 
+        <!-- 分组 / 排序：仅计划内与作业视图显示 -->
+        <Grid ColumnDefinitions="Auto,*,Auto,*" ColumnSpacing="6"
+              IsVisible="{Binding ShowListLayoutControls}">
+          <TextBlock Grid.Column="0" Text="分组" Classes="faint" VerticalAlignment="Center" />
+          <ComboBox Grid.Column="1" SelectedIndex="{Binding ListGroupModeIndex, Mode=TwoWay}"
+                    FontSize="12" MinHeight="28" HorizontalAlignment="Stretch"
+                    ToolTip.Tip="计划内 / 作业可按来源或课程归组">
+            <ComboBoxItem>不分组</ComboBoxItem>
+            <ComboBoxItem>按来源</ComboBoxItem>
+            <ComboBoxItem>按课程</ComboBoxItem>
+          </ComboBox>
+          <TextBlock Grid.Column="2" Text="排序" Classes="faint"
+                     VerticalAlignment="Center" Margin="4,0,0,0" />
+          <ComboBox Grid.Column="3" SelectedIndex="{Binding ListSortModeIndex, Mode=TwoWay}"
+                    FontSize="12" MinHeight="28" HorizontalAlignment="Stretch"
+                    ToolTip.Tip="按优先级排序时，平台作业没有手动优先级，同优先级仍按截止时间">
+            <ComboBoxItem>按时间</ComboBoxItem>
+            <ComboBoxItem>按优先级</ComboBoxItem>
+          </ComboBox>
+        </Grid>
+
         <!-- 今天的课（只在我的一天展示，来自课表展开） -->
         <StackPanel Spacing="6" IsVisible="{Binding ShowTodayClasses}">
           <TextBlock Text="今天的课" FontSize="12" FontWeight="SemiBold"
@@ -135,70 +156,77 @@
         <ItemsControl ItemsSource="{Binding List.VisibleItems}">
           <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="vm:TodoItemViewModel">
-              <Border Classes="row"
-                      Classes.selected="{Binding IsSelected}"
-                      Classes.serverdone="{Binding IsCompletedOnServer}"
-                      Classes.localdone="{Binding IsDone}"
-                      Tapped="OnRowTapped">
-                <Grid ColumnDefinitions="Auto,*,Auto">
+              <StackPanel>
+                <!-- 分组标题贴在每组第一条上方：不额外制造一行，勾选/选中仍只面对真实条目 -->
+                <Border IsVisible="{Binding IsGroupStart}" Margin="14,10,14,3">
+                  <TextBlock Classes="groupHeader" Text="{Binding GroupLabel}" />
+                </Border>
 
-                  <!-- 圆形勾选（本地） -->
-                  <CheckBox Grid.Column="0" Classes="todocircle"
-                            IsChecked="{Binding IsDone, Mode=OneWay}"
-                            Click="OnCheckboxClick"
-                            VerticalAlignment="Top" Margin="0,1,0,0"
-                            ToolTip.Tip="在应用内标记（不改变雨课堂的完成状态）" />
-
-                  <!-- 主体：主标题学科名、副标题作业/考试标题（学期前缀已剥离） -->
-                  <StackPanel Grid.Column="1" Margin="10,0,8,0" Spacing="3">
-                    <TextBlock Classes="title" Text="{Binding HeaderPrimary}" />
-
-                    <!-- 副标题行：Grid 的 * 列让标题按实际宽度截断（显式 Width=200
-                         在手机上会盖住右侧徽标），完成状态跟在标题后。 -->
-                    <Grid ColumnDefinitions="*,Auto">
-                      <TextBlock Classes="faint" Text="{Binding HeaderSecondary}" />
-                      <TextBlock Grid.Column="1" Classes="overdue" Text="{Binding StatusText}"
-                                 Margin="6,0,0,0"
-                                 IsVisible="{Binding IsCompletedOnServer}" />
-                    </Grid>
-
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                      <TextBlock Classes="meta" Text="{Binding DueText}" />
-                      <!-- 雨课堂已判定完成的作业不该再显示「已过期」：
-                           剩余时间只对未完成的事项有意义。 -->
-                      <TextBlock Classes="faint" Text="·"
-                                 IsVisible="{Binding ShowRemaining}" />
-                      <TextBlock Classes="meta" Text="{Binding RemainingText}"
-                                 IsVisible="{Binding ShowRemainingNotOverdue}" />
-                      <TextBlock Classes="overdue" Text="{Binding RemainingText}"
-                                 IsVisible="{Binding ShowRemainingOverdue}" />
+                <Border Classes="row"
+                        Classes.selected="{Binding IsSelected}"
+                        Classes.serverdone="{Binding IsCompletedOnServer}"
+                        Classes.localdone="{Binding IsDone}"
+                        Tapped="OnRowTapped">
+                  <Grid ColumnDefinitions="Auto,*,Auto">
+  
+                    <!-- 圆形勾选（本地） -->
+                    <CheckBox Grid.Column="0" Classes="todocircle"
+                              IsChecked="{Binding IsDone, Mode=OneWay}"
+                              Click="OnCheckboxClick"
+                              VerticalAlignment="Top" Margin="0,1,0,0"
+                              ToolTip.Tip="在应用内标记（不改变雨课堂的完成状态）" />
+  
+                    <!-- 主体：主标题学科名、副标题作业/考试标题（学期前缀已剥离） -->
+                    <StackPanel Grid.Column="1" Margin="10,0,8,0" Spacing="3">
+                      <TextBlock Classes="title" Text="{Binding HeaderPrimary}" />
+  
+                      <!-- 副标题行：Grid 的 * 列让标题按实际宽度截断（显式 Width=200
+                           在手机上会盖住右侧徽标），完成状态跟在标题后。 -->
+                      <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock Classes="faint" Text="{Binding HeaderSecondary}" />
+                        <TextBlock Grid.Column="1" Classes="overdue" Text="{Binding StatusText}"
+                                   Margin="6,0,0,0"
+                                   IsVisible="{Binding IsCompletedOnServer}" />
+                      </Grid>
+  
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Classes="meta" Text="{Binding DueText}" />
+                        <!-- 雨课堂已判定完成的作业不该再显示「已过期」：
+                             剩余时间只对未完成的事项有意义。 -->
+                        <TextBlock Classes="faint" Text="·"
+                                   IsVisible="{Binding ShowRemaining}" />
+                        <TextBlock Classes="meta" Text="{Binding RemainingText}"
+                                   IsVisible="{Binding ShowRemainingNotOverdue}" />
+                        <TextBlock Classes="overdue" Text="{Binding RemainingText}"
+                                   IsVisible="{Binding ShowRemainingOverdue}" />
+                      </StackPanel>
                     </StackPanel>
-                  </StackPanel>
-
-                  <!-- 右侧徽标：进度 / 已过期 / 真实完成状态 -->
-                  <StackPanel Grid.Column="2" Spacing="4" VerticalAlignment="Top">
-                    <Button Classes="tool" IsVisible="{Binding IsStarred}" Click="OnStarClick"
-                            Padding="2" ToolTip.Tip="取消星标">
-                      <TextBlock Text="&#xF005;" FontSize="13"
-                                 Foreground="{DynamicResource TodoWarningBorder}" />
-                    </Button>
-                    <Border Classes="badge warn" IsVisible="{Binding IsHighPriority}">
-                      <TextBlock Text="高" />
-                    </Border>
-                    <Border Classes="badge progress" IsVisible="{Binding ShowProgress}">
-                      <TextBlock Text="{Binding ProgressText}" />
-                    </Border>
-                    <Border Classes="badge warn"
-                            IsVisible="{Binding IsOverdue}">
-                      <TextBlock Text="已过期" />
-                    </Border>
-                    <Border Classes="badge"
-                            IsVisible="{Binding IsCompletedOnServer}">
-                      <TextBlock Text="雨课堂已完成" />
-                    </Border>
-                  </StackPanel>
-                </Grid>
-              </Border>
+  
+                    <!-- 右侧徽标：进度 / 已过期 / 真实完成状态 -->
+                    <StackPanel Grid.Column="2" Spacing="4" VerticalAlignment="Top">
+                      <Button Classes="tool" IsVisible="{Binding IsStarred}" Click="OnStarClick"
+                              Padding="2" ToolTip.Tip="取消星标">
+                        <TextBlock Text="&#xF005;" FontSize="13"
+                                   Foreground="{DynamicResource TodoWarningBorder}" />
+                      </Button>
+                      <Border Classes="badge warn" IsVisible="{Binding IsHighPriority}">
+                        <TextBlock Text="高" />
+                      </Border>
+                      <Border Classes="badge progress" IsVisible="{Binding ShowProgress}">
+                        <TextBlock Text="{Binding ProgressText}" />
+                      </Border>
+                      <Border Classes="badge warn"
+                              IsVisible="{Binding IsOverdue}">
+                        <TextBlock Text="已过期" />
+                      </Border>
+                      <Border Classes="badge"
+                              IsVisible="{Binding IsCompletedOnServer}">
+                        <TextBlock Text="雨课堂已完成" />
+                      </Border>
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </StackPanel>
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
