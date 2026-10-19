@@ -10,8 +10,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>HomeworkReminder.ToastProbe</RootNamespace>
-    <AssemblyName>HomeworkReminder.ToastProbe</AssemblyName>
+    <RootNamespace>UniversityTodos.ToastProbe</RootNamespace>
+    <AssemblyName>UniversityTodos.ToastProbe</AssemblyName>
     <!-- 探针自身也用 WinForms 无关，仅需注册表访问，标准库足够 -->
   </PropertyGroup>
 </Project>

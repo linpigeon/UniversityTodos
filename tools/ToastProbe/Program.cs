@@ -14,7 +14,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32;
 
-const string Aumid = "HomeworkReminder.ToastProbe";
+const string Aumid = "UniversityTodos.ToastProbe";
 
 Console.OutputEncoding = Encoding.UTF8;
 

@@ -2,8 +2,8 @@
   <!--
     应用版本号的唯一事实来源。
 
-    为什么放在根级：原先 <Version> 只写在共享项目 HomeworkReminder.csproj 里，
-    而**桌面头没有**，于是 HomeworkReminder.Desktop.exe 用了默认的 1.0.0 ——
+    为什么放在根级：原先 <Version> 只写在共享项目 UniversityTodos.csproj 里，
+    而**桌面头没有**，于是 UniversityTodos.Desktop.exe 用了默认的 1.0.0 ——
     实测发布版 exe 的 FileVersion 是 "1.0.0.0"、ProductVersion 是 "1.0.0+<sha>"，
     与 release tag 完全对不上。后果有两个：
       1. exe 属性对话框里永远显示 1.0.0；
@@ -19,8 +19,8 @@
     <Version>1.4.5</Version>
     <!--
       用户可见的产品名（exe 属性对话框、任务管理器描述等）。
-      程序集名/命名空间仍是 HomeworkReminder：改它们会连带 avares:// 资源 URI、
-      更新包的 entry 名与用户数据目录，风险远大于收益。
+      程序集名/命名空间自 2026-10 全量改名起与产品名一致（UniversityTodos.*）；
+      avares:// 资源 URI、更新包 entry 与数据目录都依赖这套标识，改动要整体同步。
     -->
     <Product>大学事项综合待办</Product>
     <AssemblyTitle>大学事项综合待办</AssemblyTitle>

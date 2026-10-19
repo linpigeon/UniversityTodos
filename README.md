@@ -5,8 +5,8 @@
 
 > 仓库：GitHub `linpigeon/UniversityTodos` · Gitea `lin/UniversityTodos`。
 > 本地检出目录名只影响命令行里的路径，不代表仓库身份——两者可以不同，脚本与文档一律用相对路径。
-> 代码标识（程序集名、命名空间、Android 包名）仍沿用 `HomeworkReminder`，
-> 以便老用户的本地数据与自动更新不中断；安装版的数据目录改为安装目录下的 `Data`（见下文）。
+> 代码标识（程序集名、命名空间、Android 包名、通知 AUMID、数据目录）已统一为 `UniversityTodos`；
+> 旧版 `%LOCALAPPDATA%\HomeworkReminder` 里的数据会在首次启动时自动迁移（见「数据存放」）。
 
 ![界面](docs/screenshots/app-main.png)
 
@@ -57,17 +57,18 @@
   - `<安装目录>\Data`：设置、登录态、待办缓存、自建待办、提醒状态、课表；
   - `<安装目录>\Cache\WebView2`：登录页浏览器缓存；
   - `portable.flag`：安装模式标记。删掉它，应用会回到兼容模式
-    （数据在 `%LOCALAPPDATA%\HomeworkReminder`）。
+    （数据在 `%LOCALAPPDATA%\UniversityTodos`）。
 - 安装向导检测到旧版数据时可勾选「迁移旧数据」；卸载默认**保留** `Data`。
 - 已经在用旧版？打开 **设置 → 关于 → 下载安装版…**，应用会自动下载安装包；下载后先退出再运行。
 - 安装包未做代码签名，Windows SmartScreen 可能提示，选择「更多信息 → 仍要运行」即可。
 
 > 从旧版**自动更新**（zip）过来的用户不会切到安装模式：exe 旁没有 `portable.flag`，
-> 仍使用原来的 `%LOCALAPPDATA%\HomeworkReminder`，不需要迁移。
+> 首次启动会把 `%LOCALAPPDATA%\HomeworkReminder` 里的业务 JSON 自动复制到
+> `%LOCALAPPDATA%\UniversityTodos`，旧目录保留，不需要手工搬运。
 
 ## 快速开始
 
-双击运行 `HomeworkReminder.Desktop.exe`，**启动直接进主界面**（登录不再是启动门禁）。
+双击运行 `UniversityTodos.Desktop.exe`，**启动直接进主界面**（登录不再是启动门禁）。
 没有登录态时列表顶部会有一条「去登录」引导，点它直达设置页的「账号」选项卡。
 
 在**设置 → 账号**里可以分别登录三个数据源：
@@ -110,7 +111,7 @@
 通知涉及注册表、开始菜单快捷方式与 WinRT 三层，出问题时不易定位，因此单独留了自检：
 
 ```powershell
-.\HomeworkReminder.Desktop.exe --toastcheck
+.\UniversityTodos.Desktop.exe --toastcheck
 ```
 
 逐项报告：AUMID 注册 → 开始菜单快捷方式 → toast XML 生成与转义 → WinRT 投递（失败给 HRESULT）。
@@ -143,7 +144,7 @@
 | 模式 | 数据 / 缓存位置 | 适用 |
 |---|---|---|
 | **安装/便携模式**（有 `portable.flag`） | `<安装目录>\Data\` 存全部 JSON；`<安装目录>\Cache\WebView2\` 存 WebView2 缓存 | 安装包安装；或手动在 exe 旁建 `portable.flag` |
-| **兼容模式**（没有标记） | `%LOCALAPPDATA%\HomeworkReminder\` 存全部 JSON；WebView2 缓存在 exe 旁边 | 旧版自动更新、直接解压 zip |
+| **兼容模式**（没有标记） | `%LOCALAPPDATA%\UniversityTodos\` 存全部 JSON；WebView2 缓存在 exe 旁边 | 旧版自动更新、直接解压 zip |
 
 `Data` / 用户目录里的文件：
 
@@ -160,27 +161,37 @@
 | `schedule.json` | 课表 |
 | `startup.log` | 启动日志 |
 
-数据目录可用环境变量 `HOMEWORKREMINDER_DATA_DIR` 覆盖（优先级最高）。
+数据目录可用环境变量 `UNIVERSITYTODOS_DATA_DIR` 覆盖（优先级最高）；
+改名前的 `HOMEWORKREMINDER_DATA_DIR` 仍然兼容，两个都设时以新名为准。
 
-### 从旧版迁移数据（安装版首次使用）
+### 从旧版（HomeworkReminder）迁移数据
 
-> 先**退出**旧程序，再复制文件；迁移前建议把 `%LOCALAPPDATA%\HomeworkReminder`
-> 整个目录压缩备份一份。旧目录确认无误前不要删。
+> 迁移只搬 `*.json`，数据格式没变。动手前建议把旧目录
+> `%LOCALAPPDATA%\HomeworkReminder` 整个压缩备份一份，确认新版数据齐全后再删。
 
-**方式一：安装向导自动迁移（推荐）**
+**方式一：自动迁移（zip / 应用内更新，推荐）**
+
+1. 退出旧版，用新版 exe 覆盖或解压运行（保持兼容模式：exe 旁没有 `portable.flag`）；
+2. 首次启动时，若 `%LOCALAPPDATA%\UniversityTodos` 还不存在、而
+   `%LOCALAPPDATA%\HomeworkReminder` 在，应用会把其中的 `*.json`
+   （设置、登录态、待办、课表……）复制到新目录，旧目录原样保留；
+3. 打开 **设置 → 关于 → 数据** 核对「数据位置」，确认待办 / 课表 / 登录态齐全。
+
+**方式二：安装向导自动迁移**
 
 1. 运行 `UniversityTodos-<tag>-Setup.exe`；
-2. 安装向导检测到 `%LOCALAPPDATA%\HomeworkReminder` 时，会显示「迁移旧数据」页，保持勾选；
+2. 向导检测到 `%LOCALAPPDATA%\HomeworkReminder`（或新名字 zip 版留下的
+   `%LOCALAPPDATA%\UniversityTodos`）时，会显示「迁移旧数据」页，保持勾选；
 3. 安装完成后打开应用，到 **设置 → 关于 → 数据**，确认「数据位置」显示
    `<安装目录>\Data`；
 4. 检查作业/待办/课表/登录态是否齐全；缺什么再从备份补。
 
-**方式二：手动复制（跳过了迁移页，或想自己控制）**
+**方式三：手动复制（跳过了迁移页，或想自己控制）**
 
 1. 如果用的是安装版：`<安装目录>\Data` 已经存在，直接进行第 3 步；
 2. 如果用的是 zip：把 exe 放进一个**可写目录**，在 exe 旁新建空文件 `portable.flag`
-   和 `Data` 文件夹（不建标记就仍是兼容模式，数据继续留在旧目录，不需要迁移）；
-3. 把 `%LOCALAPPDATA%\HomeworkReminder\*.json` 复制到 `Data\`
+   和 `Data` 文件夹（不建标记就仍是兼容模式，数据继续留在用户目录，不需要迁移）；
+3. 把 `%LOCALAPPDATA%\HomeworkReminder\*.json`（或新名字目录）复制到 `Data\`
    （只复制 JSON，不要复制 `startup.log`、`.WebView2` 缓存）；
 4. 启动应用，按上面的方法核对「数据位置」。
 
@@ -188,8 +199,11 @@
 是 DPAPI 密文，只能在同一台机器的同一 Windows 用户下解密；迁移后如果提示未登录，
 重新扫码/登录一次即可，其余待办与课表不受影响。
 
-**想回到旧位置**：删除 `<安装目录>\portable.flag` 后重启，应用会重新读写
-`%LOCALAPPDATA%\HomeworkReminder`（安装版 `Data` 里的数据会留在原处，可手动合并）。
+**想回到用户目录**：删除 `<安装目录>\portable.flag` 后重启，应用会重新读写
+`%LOCALAPPDATA%\UniversityTodos`（安装版 `Data` 里的数据会留在原处，可手动合并）。
+
+> Android 包名同步改为 `com.CompanyName.UniversityTodos`，对系统来说是一个**新应用**，
+> 需要卸载旧 APK 后重新安装；两端的待办数据本来就不互通，登录态也要重新扫码。
 
 ## 代码签名（需要自备证书）
 
@@ -201,7 +215,7 @@
 ```powershell
 # 1. 先签 exe，再打安装包，安装包内才是已签名的程序
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
-  /f D:\cert.pfx /p <密码> publish\trim\HomeworkReminder.Desktop.exe
+  /f D:\cert.pfx /p <密码> publish\trim\UniversityTodos.Desktop.exe
 
 .\tools\build-installer.ps1 -Version 1.4.5
 
@@ -232,17 +246,17 @@ signtool verify /pa /v publish\UniversityTodos-Setup-1.4.5.exe
 ### 发布产物自检
 
 ```powershell
-.\HomeworkReminder.Desktop.exe --selfcheck out.png   # 窗口/绑定自检 + 离屏渲染
-.\HomeworkReminder.Desktop.exe --jsoncheck           # 序列化路径自检（裁剪版必过项）
-.\HomeworkReminder.Desktop.exe --installercheck      # 解析最新安装包（传目录则实际下载校验）
-.\HomeworkReminder.Desktop.exe --toastcheck          # 通知链路自检
-.\HomeworkReminder.Desktop.exe --selfcheck-widget w.png  # 小组件渲染自检
-.\HomeworkReminder.Desktop.exe --cxcheck             # 学习通课程任务点在线自检（只读）
-.\HomeworkReminder.Desktop.exe --detailcheck         # 详情面板互斥回归（课程/待办不叠加）
-.\HomeworkReminder.Desktop.exe --updatecheck         # 检查更新并走完整更新流程（视为用户已同意）
-.\HomeworkReminder.Desktop.exe --updatecheck --target <exe>  # 同上，但替换指定 exe（沙箱演练用）
-.\HomeworkReminder.Desktop.exe --pigailogin <账号> <密码>  # 批改网登录捕获链路
-.\HomeworkReminder.Desktop.exe --pigaitest "<cookie>"      # 批改网下游链路
+.\UniversityTodos.Desktop.exe --selfcheck out.png   # 窗口/绑定自检 + 离屏渲染
+.\UniversityTodos.Desktop.exe --jsoncheck           # 序列化路径自检（裁剪版必过项）
+.\UniversityTodos.Desktop.exe --installercheck      # 解析最新安装包（传目录则实际下载校验）
+.\UniversityTodos.Desktop.exe --toastcheck          # 通知链路自检
+.\UniversityTodos.Desktop.exe --selfcheck-widget w.png  # 小组件渲染自检
+.\UniversityTodos.Desktop.exe --cxcheck             # 学习通课程任务点在线自检（只读）
+.\UniversityTodos.Desktop.exe --detailcheck         # 详情面板互斥回归（课程/待办不叠加）
+.\UniversityTodos.Desktop.exe --updatecheck         # 检查更新并走完整更新流程（视为用户已同意）
+.\UniversityTodos.Desktop.exe --updatecheck --target <exe>  # 同上，但替换指定 exe（沙箱演练用）
+.\UniversityTodos.Desktop.exe --pigailogin <账号> <密码>  # 批改网登录捕获链路
+.\UniversityTodos.Desktop.exe --pigaitest "<cookie>"      # 批改网下游链路
 ```
 
 > **演练应用内更新**：把整套程序文件复制到临时目录，再用副本跑
@@ -253,7 +267,7 @@ signtool verify /pa /v publish\UniversityTodos-Setup-1.4.5.exe
 退出码为 0 即表示产物健康。`--cxcheck` / `--pigailogin` / `--pigaitest` 会真实访问
 对应站点（只读，不修改远端状态），需要本机已有对应登录态或传入凭据。
 
-> 渲染其他视图：`HWREMINDER_SELFCHECK_NAV=course` 可让 `--selfcheck`
+> 渲染其他视图：`UNIVERSITYTODOS_SELFCHECK_NAV=course` 可让 `--selfcheck`
 > 渲染「课程」视图而不是默认的「作业」视图。
 
 ### 发版流程（含应用内更新所需的清单）
@@ -273,7 +287,7 @@ signtool verify /pa /v publish\UniversityTodos-Setup-1.4.5.exe
 $env:GITHUB_TOKEN='<GitHub 令牌>'; $env:GITEA_TOKEN='<Gitea 令牌>'
 .\tools\release.ps1 -Tag v1.4.5 -Upload `
   -Installer .\publish\UniversityTodos-Setup-1.4.5.exe `
-  -AndroidApk .\HomeworkReminder.Android\bin\Release\net10.0-android\com.CompanyName.HomeworkReminder-Signed.apk
+  -AndroidApk .\UniversityTodos.Android\bin\Release\net10.0-android\com.CompanyName.UniversityTodos-Signed.apk
 
 # 只校验并打包、不上传
 .\tools\release.ps1 -Tag v1.4.5
@@ -281,7 +295,7 @@ $env:GITHUB_TOKEN='<GitHub 令牌>'; $env:GITEA_TOKEN='<Gitea 令牌>'
 # 产物已生成、只想重传（例如补权限后）
 .\tools\release.ps1 -Tag v1.4.5 -SkipBuild -Upload `
   -Installer .\publish\UniversityTodos-Setup-1.4.5.exe `
-  -AndroidApk .\HomeworkReminder.Android\bin\Release\net10.0-android\com.CompanyName.HomeworkReminder-Signed.apk
+  -AndroidApk .\UniversityTodos.Android\bin\Release\net10.0-android\com.CompanyName.UniversityTodos-Signed.apk
 ```
 
 **版本号必须与 tag 一致**，否则客户端会陷入更新循环（装了新版仍报旧版号，每次检查都提示有更新）。
@@ -322,11 +336,11 @@ Android APK（`UniversityTodos-<tag>-android.apk`）也放在同一个 release�
 
 | 环境变量                        | 产物                | 作用                                                        |
 | --------------------------- | ----------------- | --------------------------------------------------------- |
-| `HWREMINDER_LOGIN_DOM_DUMP=1` | `login-dom.txt`   | 主文档的关键元素与坐标（原有）                                        |
-| `HWREMINDER_LOGIN_PROBE=1`    | `login-probe.txt` | **主文档 + 各 iframe 的可见文本、按钮/链接、二维码元素**（登录方式实际在 iframe 里，只 dump 主文档看不到） |
-| `HWREMINDER_PIGAI_DEBUG=1`    | `pigai-login.log` | 批改网登录探测：每次导航、Cookie 名字与域、捕获判定。只记 Cookie **名字**，不记值          |
-| `HWREMINDER_CLEAR_WEBVIEW_LOGIN=1` | —            | 进入登录页前先清掉 WebView 里的持久化登录态，便于看到二维码而不是直接接管旧会话              |
-| `HWREMINDER_FORCE_LOGIN=1`    | —                 | 正常运行模式下也强制停在登录覆盖层，便于在真窗口里复现问题                             |
+| `UNIVERSITYTODOS_LOGIN_DOM_DUMP=1` | `login-dom.txt`   | 主文档的关键元素与坐标（原有）                                        |
+| `UNIVERSITYTODOS_LOGIN_PROBE=1`    | `login-probe.txt` | **主文档 + 各 iframe 的可见文本、按钮/链接、二维码元素**（登录方式实际在 iframe 里，只 dump 主文档看不到） |
+| `UNIVERSITYTODOS_PIGAI_DEBUG=1`    | `pigai-login.log` | 批改网登录探测：每次导航、Cookie 名字与域、捕获判定。只记 Cookie **名字**，不记值          |
+| `UNIVERSITYTODOS_CLEAR_WEBVIEW_LOGIN=1` | —            | 进入登录页前先清掉 WebView 里的持久化登录态，便于看到二维码而不是直接接管旧会话              |
+| `UNIVERSITYTODOS_FORCE_LOGIN=1`    | —                 | 正常运行模式下也强制停在登录覆盖层，便于在真窗口里复现问题                             |
 
 ### 批改网登录链路的自检
 批改网登录**严格沿用雨课堂那条已跑通的路径**：打开覆盖层后起一个 async 轮询循环
@@ -345,10 +359,10 @@ Android APK（`UniversityTodos-<tag>-android.apk`）也放在同一个 release�
 
 ```powershell
 # 上游：驱动登录页填表提交，验证「登录后能自动捕获并返回」
-.\HomeworkReminder.Desktop.exe --pigailogin <账号> <密码> 150
+.\UniversityTodos.Desktop.exe --pigailogin <账号> <密码> 150
 
 # 下游：给一条真实会话 cookie，验证「接管 → 关覆盖层 → 同步 → 待办出现作文」
-.\HomeworkReminder.Desktop.exe --pigaitest "<整条cookie>" 120
+.\UniversityTodos.Desktop.exe --pigaitest "<整条cookie>" 120
 ```
 
 两者退出码 0 即通过。凭据/cookie 只从命令行读进内存，不落盘、不写日志。
@@ -363,7 +377,7 @@ Android APK（`UniversityTodos-<tag>-android.apk`）也放在同一个 release�
 ## 项目结构
 
 ```
-HomeworkReminder/                 共享项目：模型、服务、视图、ViewModel
+UniversityTodos/                 共享项目：模型、服务、视图、ViewModel
   Models/                         TodoItem 等数据模型
   Services/                       每个数据源一套「客户端 + 登录 + 会话 + 同步」：
     YktApiClient / YktLoginService / SessionStore / SyncService
@@ -388,8 +402,8 @@ HomeworkReminder/                 共享项目：模型、服务、视图、View
                                   WidgetView + WidgetWindow（桌面小组件）
   Styles/TodoTheme.axaml          仿 To Do 的 Fluent 控件样式（含深色主题）
   Styles/WidgetTheme.axaml        桌面小组件的深色半透明样式
-HomeworkReminder.Desktop/         桌面宿主（启动、托盘、自检入口）
-HomeworkReminder.Android/         Android 宿主（抽屉式外壳、原生 CookieManager 钩子）
+UniversityTodos.Desktop/         桌面宿主（启动、托盘、自检入口）
+UniversityTodos.Android/         Android 宿主（抽屉式外壳、原生 CookieManager 钩子）
 tools/                            构建、发布、冒烟测试脚本
 docs/                             接口实测文档与调研记录
   ykt-api.md                      雨课堂接口实测

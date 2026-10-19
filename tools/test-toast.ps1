@@ -6,11 +6,11 @@
 #
 # 用法：
 #   .\tools\test-toast.ps1                 # 用 bin\Debug 的构建
-#   .\tools\test-toast.ps1 -Exe publish\trim\HomeworkReminder.Desktop.exe
+#   .\tools\test-toast.ps1 -Exe publish\trim\UniversityTodos.Desktop.exe
 #
 # 退出码：0 = 通知链路可用且 toast 入历史；非 0 = 失败（原因见输出）。
 param(
-    [string]$Exe = "HomeworkReminder.Desktop\bin\Debug\net10.0\HomeworkReminder.Desktop.exe"
+    [string]$Exe = "UniversityTodos.Desktop\bin\Debug\net10.0\UniversityTodos.Desktop.exe"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -45,7 +45,7 @@ try {
     [Windows.UI.Notifications.ToastNotification, Windows.UI.Notifications, ContentType=WindowsRuntime] | Out-Null
 
     $history = [Windows.UI.Notifications.ToastNotificationManager]::History
-    $items = $history.GetHistory("HomeworkReminder.Desktop")
+    $items = $history.GetHistory("UniversityTodos.Desktop")
 
     # --toastcheck 测试 toast 的特征：launch URL 里的课堂 id 26111830。
     # 注意历史条目是 WinRT 投影：没有 Shown 时间戳，Payload 也为 null，

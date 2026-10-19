@@ -7,7 +7,8 @@
 ;   · 安装后在 exe 旁写 portable.flag，应用据此把数据放 Data、WebView2 缓存放 Cache。
 ;   · 桌面 + 开始菜单快捷方式；卸载时默认保留 Data（设置/待办/登录态），
 ;     只有用户明确选择「不保留」才删。
-;   · 首次安装可勾选迁移旧版 %LOCALAPPDATA%\HomeworkReminder 的 JSON 数据。
+;   · 首次安装可勾选迁移旧版数据：%LOCALAPPDATA%\HomeworkReminder（改名前的目录），
+;     或 %LOCALAPPDATA%\UniversityTodos（新名字的 zip 版）。
 
 Unicode true
 
@@ -29,7 +30,7 @@ Unicode true
 !endif
 
 !define APP_NAME "大学事项综合待办"
-!define APP_EXE "HomeworkReminder.Desktop.exe"
+!define APP_EXE "UniversityTodos.Desktop.exe"
 !define APP_PUBLISHER "linpigeon"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\UniversityTodos"
 !define APP_REG_KEY "Software\UniversityTodos"
@@ -50,8 +51,8 @@ VIAddVersionKey /LANG=2052 "CompanyName" "${APP_PUBLISHER}"
 VIAddVersionKey /LANG=2052 "LegalCopyright" "Copyright (c) 2026 linpigeon"
 
 !define MUI_ABORTWARNING
-!define MUI_ICON "..\HomeworkReminder\Assets\app.ico"
-!define MUI_UNICON "..\HomeworkReminder\Assets\app.ico"
+!define MUI_ICON "..\UniversityTodos\Assets\app.ico"
+!define MUI_UNICON "..\UniversityTodos\Assets\app.ico"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${APP_EXE}"
 !define MUI_FINISHPAGE_RUN_TEXT "立即运行 ${APP_NAME}"
 !define MUI_FINISHPAGE_LINK "项目主页：github.com/linpigeon/UniversityTodos"
@@ -66,6 +67,16 @@ Function .onInit
   ; 默认迁移：静默安装没有向导页，也应当把旧数据带过来。
   StrCpy $MigrateOldData 1
   StrCpy $OldDataDir "${OLD_DATA_DIR}"
+
+  ; 从「新名字的 zip 版」升级上来的用户，数据在 %LOCALAPPDATA%\UniversityTodos；
+  ; 旧目录没有数据时改从那里迁移，避免装完看不到原有待办。
+  ${IfNot} ${FileExists} "$OldDataDir\settings.json"
+  ${AndIfNot} ${FileExists} "$OldDataDir\session.json"
+  ${AndIfNot} ${FileExists} "$OldDataDir\todos.json"
+    ${If} ${FileExists} "$LOCALAPPDATA\UniversityTodos\settings.json"
+      StrCpy $OldDataDir "$LOCALAPPDATA\UniversityTodos"
+    ${EndIf}
+  ${EndIf}
 
   ; 程序在运行时替换 exe 会失败，先让用户退出，避免装到一半留下半套文件。
   FindWindow $0 "" "${APP_NAME}"
@@ -134,6 +145,10 @@ Section "安装"
 
   ; 载荷来自 publish\trim：单个 exe（约 43 MB）。
   File "${PAYLOAD_DIR}\${APP_EXE}"
+
+  ; 旧名的 exe 与新版装在同一目录时会变成两个入口，清掉它（文件被占用时卸不掉，
+  ; 上面的窗口检测已先要求用户退出）。
+  Delete "$INSTDIR\HomeworkReminder.Desktop.exe"
 
   ; 安装标记：应用据此把 Data / Cache 放在安装目录下。
   CreateDirectory "$INSTDIR\Data"

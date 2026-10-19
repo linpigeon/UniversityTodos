@@ -7,7 +7,7 @@
 #      occluded, but GPU-composited (Avalonia/Skia) windows may come back blank,
 #      so fall back to a screen-region grab with the window raised.
 param(
-    [string]$ProcessName = 'HomeworkReminder.Desktop',
+    [string]$ProcessName = 'UniversityTodos.Desktop',
     [string]$TitleMatch = '作业提醒',
     # 默认输出到仓库内 docs\screenshots（由脚本位置推导，不再写死盘符路径）。
     [string]$OutFile = (Join-Path (Split-Path -Parent $PSScriptRoot) 'docs\screenshots\app.png'),

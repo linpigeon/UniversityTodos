@@ -1,0 +1,96 @@
+using System;
+using Android.App;
+using Android.Content;
+using UniversityTodos.Services;
+
+namespace UniversityTodos.Android;
+
+/// <summary>
+/// Android 平台的 <see cref="IPlatformServices"/> 实现。
+/// </summary>
+internal sealed class AndroidPlatformServices : IPlatformServices
+{
+    /// <summary>雨课堂（长江雨课堂）App 的包名。</summary>
+    private const string YktPackage = "com.xuetangx.ykt";
+
+    private static Context Ctx => Application.Context;
+
+    public void OpenUrl(string url)
+    {
+        try
+        {
+            var intent = new Intent(Intent.ActionView, global::Android.Net.Uri.Parse(url));
+            intent.AddFlags(ActivityFlags.NewTask);
+            Ctx.StartActivity(intent);
+        }
+        catch (Exception)
+        {
+            // 打不开浏览器不影响应用其它功能。
+        }
+    }
+
+    /// <summary>
+    /// 把雨课堂主域的会话 cookie 铺到移动答题页所在的子域。
+    /// <para>
+    /// <c>sessionid</c> 是 <c>changjiang.yuketang.cn</c> 的 cookie；移动答题页在
+    /// <c>changjiang-exam</c> 子域，域名不同的 host-only cookie 不会自动带过去。
+    /// </para>
+    /// </summary>
+    public void PrepareExamWebSession()
+    {
+        try
+        {
+            var cm = global::Android.Webkit.CookieManager.Instance;
+            var raw = cm?.GetCookie("https://changjiang.yuketang.cn");
+            if (cm is null || string.IsNullOrEmpty(raw)) return;
+
+            // CookieManager.SetCookie 一次只接受**一条** Set-Cookie：
+            // 把整条 Cookie 头（"a=1; b=2"）直接传进去时，只有第一条生效，
+            // 其余会被当成未知属性忽略。雨课堂的 csrftoken 常排在 sessionid 前面，
+            // 整串传过去往往只铺了 csrftoken，答题页仍然要求登录。
+            foreach (var part in raw.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var pair = part.Trim();
+                if (pair.Length == 0 || !pair.Contains('=')) continue;
+                cm.SetCookie("https://changjiang-exam.yuketang.cn", pair);
+            }
+            cm.Flush();
+        }
+        catch (Exception)
+        {
+            // 铺 cookie 失败的最坏结果是答题页要求重新登录，不该把外壳拖崩。
+        }
+    }
+
+    /// <summary>
+    /// 拉起雨课堂 App。雨课堂只注册了 <c>app://yuketang</c> 这一个深链入口
+    /// （manifest 里没有 https applinks）；试卷类作业的路由参数按它推送通知的
+    /// 内部路由格式附带（exam?classroomId=..&amp;examId=..）——当前版本实测只解析不跳转，
+    /// 参数为前向兼容保留，App 忽略时会落在首页。
+    /// </summary>
+    public bool OpenInYktApp(string url)
+    {
+        try
+        {
+            var deepLink = "app://yuketang";
+            // https://changjiang.yuketang.cn/v2/web/exam/{classroomId}/{examId}
+            var m = System.Text.RegularExpressions.Regex.Match(
+                url, @"/v2/web/exam/(\d+)/(\d+)");
+            if (m.Success)
+            {
+                deepLink = $"app://yuketang/exam?classroomId={m.Groups[1].Value}&examId={m.Groups[2].Value}";
+            }
+
+            var intent = new Intent(Intent.ActionView, global::Android.Net.Uri.Parse(deepLink));
+            intent.SetPackage(YktPackage);
+            intent.AddFlags(ActivityFlags.NewTask);
+            Ctx.StartActivity(intent);
+            return true;
+        }
+        catch (Exception)
+        {
+            // 未安装雨课堂 / 其它异常：调用方回落浏览器。
+            return false;
+        }
+    }
+}

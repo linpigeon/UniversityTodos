@@ -21,7 +21,7 @@ if (-not $SkipBuild) {
 
 $dataDir = Join-Path $root '.appdata'
 New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
-$env:HOMEWORKREMINDER_DATA_DIR = $dataDir
+$env:UNIVERSITYTODOS_DATA_DIR = $dataDir
 
 # Seed the login state from the probe session if the app has none yet.
 $sessionFile = Join-Path $dataDir 'session.json'
@@ -40,7 +40,7 @@ if (-not (Test-Path $sessionFile)) {
     }
 }
 
-$exe = Get-ChildItem (Join-Path $root "HomeworkReminder.Desktop\bin\$Configuration") -Recurse -Filter 'HomeworkReminder.Desktop.exe' |
+$exe = Get-ChildItem (Join-Path $root "UniversityTodos.Desktop\bin\$Configuration") -Recurse -Filter 'UniversityTodos.Desktop.exe' |
     Select-Object -First 1
 if (-not $exe) { throw 'built executable not found' }
 

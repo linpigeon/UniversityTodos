@@ -1,6 +1,6 @@
 ﻿# 发布桌面端为可分发程序。
 #
-# 只发布 HomeworkReminder.Desktop（桌面头）。Android / iOS / Browser 三个头
+# 只发布 UniversityTodos.Desktop（桌面头）。Android / iOS / Browser 三个头
 # 各有自己的发布流程，不在这里处理。
 #
 # 用法：
@@ -43,7 +43,7 @@ $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:DOTNET_NOLOGO = '1'
 
 # 正在运行的实例会锁住输出目录。
-$running = Get-Process HomeworkReminder.Desktop -ErrorAction SilentlyContinue
+$running = Get-Process UniversityTodos.Desktop -ErrorAction SilentlyContinue
 if ($running) {
     Write-Host "== stopping $($running.Count) running instance(s) ==" -ForegroundColor Yellow
     $running | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -54,7 +54,7 @@ $outDir = Join-Path $root "publish\$Mode"
 if (Test-Path $outDir) { Remove-Item $outDir -Recurse -Force }
 
 $args = @(
-    'publish', 'HomeworkReminder.Desktop\HomeworkReminder.Desktop.csproj',
+    'publish', 'UniversityTodos.Desktop\UniversityTodos.Desktop.csproj',
     '-c', $Configuration,
     '-r', $Runtime,
     '-o', $outDir,

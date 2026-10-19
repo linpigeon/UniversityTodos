@@ -33,7 +33,7 @@ const out = {
 
 const dir = explicitOut
   ? path.dirname(explicitOut)
-  : path.join(os.homedir(), 'AppData', 'Local', 'HomeworkReminder');
+  : path.join(os.homedir(), 'AppData', 'Local', 'UniversityTodos');
 fs.mkdirSync(dir, { recursive: true });
 const file = explicitOut ?? path.join(dir, 'session.json');
 fs.writeFileSync(file, JSON.stringify(out, null, 2), 'utf8');

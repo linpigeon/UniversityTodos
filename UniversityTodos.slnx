@@ -1,0 +1,17 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="Directory.Packages.props" />
+  </Folder>
+  <Project Path="UniversityTodos.Android/UniversityTodos.Android.csproj">
+    <Build Solution="Debug|*" Project="false" />
+  </Project>
+  <Project Path="UniversityTodos.Browser/UniversityTodos.Browser.csproj">
+    <Build Solution="Debug|*" Project="false" />
+  </Project>
+  <Project Path="UniversityTodos.Desktop/UniversityTodos.Desktop.csproj" />
+  <Project Path="UniversityTodos.iOS/UniversityTodos.iOS.csproj">
+    <Build Solution="Debug|*" Project="false" />
+  </Project>
+  <Project Path="UniversityTodos/UniversityTodos.csproj" />
+  <Project Path="tools/SyncSmoke/SyncSmoke.csproj" />
+</Solution>

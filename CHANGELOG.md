@@ -7,6 +7,43 @@
 >
 > 历史版本：v1.2.0（基线，双端）→ v1.1.0（桌面）→ v1.0.0（桌面）。
 
+## 未发布 · 工程与代码标识全量更名
+
+> 这次不只改显示名：工程目录、`.csproj`、解决方案、命名空间、程序集名、`avares://`
+> 资源 URI、Android 包名、通知 AUMID、数据目录与环境变量前缀全部换成
+> `UniversityTodos`。对老用户是**破坏性**变更，因此配套了数据与通知的自动迁移。
+
+### 更名
+
+- 工程与目录：`HomeworkReminder` → `UniversityTodos`（共享库），
+  `.Desktop` / `.Android` / `.Browser` / `.iOS` 四个头同步改名；
+  `HomeworkReminder.slnx` → `UniversityTodos.slnx`。
+- 程序集名、命名空间、XAML `x:Class`、`avares://` 资源 URI：
+  `HomeworkReminder.*` → `UniversityTodos.*`。
+- 桌面 exe：`HomeworkReminder.Desktop.exe` → `UniversityTodos.Desktop.exe`；
+  安装包载荷、发布 zip、更新清单 `entry` 同步变化。
+- Android `applicationId`：`com.CompanyName.HomeworkReminder` →
+  `com.CompanyName.UniversityTodos`（系统视为新应用，需卸载旧 APK 后重装）。
+- 通知 AUMID：`HomeworkReminder.Desktop` → `UniversityTodos.Desktop`。
+- 数据目录：`%LOCALAPPDATA%\HomeworkReminder` → `%LOCALAPPDATA%\UniversityTodos`。
+- 环境变量：`HOMEWORKREMINDER_DATA_DIR` → `UNIVERSITYTODOS_DATA_DIR`（旧名仍兼容）；
+  诊断开关前缀 `HWREMINDER_` → `UNIVERSITYTODOS_`。
+
+### 兼容与迁移
+
+- 兼容模式首次启动时，若新目录不存在、旧目录存在，自动把旧目录顶层的 `*.json`
+  复制到新目录；旧目录原样保留，不删用户数据。
+- 安装程序迁移页同时识别旧目录与「新名字 zip 版」的用户目录；
+  安装时删除安装目录里遗留的旧名 exe，避免出现两个入口。
+- 开机自启注册表值、开始菜单通知快捷方式在首次运行时清理旧项并按新标识重建。
+- 旧备份 `HomeworkReminder-backup-*.zip` 仍可直接恢复（恢复逻辑不看文件名）。
+
+### 说明
+
+- 跨这次改名做应用内更新时，替换器按清单 `entry` 解包，并替换**当前进程的 exe 路径**，
+  因此文件名可能仍保留旧名；程序集、数据目录与通知身份都已切到新名，功能不受影响。
+- 版本号本次未动；发版时按 tag 统一覆盖。
+
 ## v1.4.5（2026-10-18）· 应用内「下载安装版」入口
 
 ### 新增

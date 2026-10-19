@@ -1,13 +1,13 @@
 using System.Text;
-using HomeworkReminder.Models;
-using HomeworkReminder.Services;
+using UniversityTodos.Models;
+using UniversityTodos.Services;
 
 // 无界面冒烟测试：走一遍真实的雨课堂接口，打印同步结果。
 // 用法：dotnet run --project tools/SyncSmoke [session.json 路径]
 
 Console.OutputEncoding = Encoding.UTF8;
 
-var dataDir = Environment.GetEnvironmentVariable("HOMEWORKREMINDER_DATA_DIR")
+var dataDir = Environment.GetEnvironmentVariable("UNIVERSITYTODOS_DATA_DIR")
               ?? AppPaths.DataDirectory;
 var sessionPath = args.Length > 0 ? args[0] : Path.Combine(dataDir, "session.json");
 

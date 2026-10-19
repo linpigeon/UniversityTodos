@@ -12,7 +12,7 @@
     版本号；省略时读 Directory.Build.props 的 <Version>。
 
 .PARAMETER PayloadDir
-    要打包的程序目录，默认 publish\trim，目录里必须有 HomeworkReminder.Desktop.exe。
+    要打包的程序目录，默认 publish\trim，目录里必须有 UniversityTodos.Desktop.exe。
 
 .PARAMETER NsisDir
     已解压的 NSIS 目录（包含 Bin\makensis.exe）。省略时自动下载 3.11 便携版。
@@ -44,9 +44,9 @@ if (-not $Version) { $Version = Get-ProjectVersion }
 $Version = $Version.TrimStart('v', 'V')
 
 $payloadAbs = [System.IO.Path]::GetFullPath((Join-Path $root $PayloadDir))
-$payloadExe = Join-Path $payloadAbs 'HomeworkReminder.Desktop.exe'
+$payloadExe = Join-Path $payloadAbs 'UniversityTodos.Desktop.exe'
 if (-not (Test-Path $payloadExe)) {
-    throw "载荷里没有 HomeworkReminder.Desktop.exe：$payloadAbs`n请先运行：.\tools\publish.ps1 -Mode trim -NoPdb"
+    throw "载荷里没有 UniversityTodos.Desktop.exe：$payloadAbs`n请先运行：.\tools\publish.ps1 -Mode trim -NoPdb"
 }
 
 if (-not $OutFile) { $OutFile = Join-Path $root "publish\UniversityTodos-Setup-$Version.exe" }

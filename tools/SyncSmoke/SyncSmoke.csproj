@@ -9,11 +9,11 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <RootNamespace>HomeworkReminder.SyncSmoke</RootNamespace>
-    <AssemblyName>HomeworkReminder.SyncSmoke</AssemblyName>
+    <RootNamespace>UniversityTodos.SyncSmoke</RootNamespace>
+    <AssemblyName>UniversityTodos.SyncSmoke</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\HomeworkReminder\HomeworkReminder.csproj" />
+    <ProjectReference Include="..\..\UniversityTodos\UniversityTodos.csproj" />
   </ItemGroup>
 </Project>

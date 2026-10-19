@@ -264,7 +264,7 @@ $dl.Add('### 下载')
 $dl.Add('')
 $dl.Add('| 平台 | 文件 | 说明 |')
 $dl.Add('|---|---|---|')
-$dl.Add("| Windows 10/11 x64 | ``UniversityTodos-$Tag-win-x64.zip`` | 内含单个 ``HomeworkReminder.Desktop.exe``（$([math]::Round((Get-Item $zipPath).Length / 1MB, 2)) MB），解压即用，无需安装运行时 |")
+$dl.Add("| Windows 10/11 x64 | ``UniversityTodos-$Tag-win-x64.zip`` | 内含单个 ``UniversityTodos.Desktop.exe``（$([math]::Round((Get-Item $zipPath).Length / 1MB, 2)) MB），解压即用，无需安装运行时 |")
 if ($installerPath) {
     $dl.Add("| Windows 安装版（推荐）| ``UniversityTodos-$Tag-Setup.exe`` | 安装到 ``%LOCALAPPDATA%\Programs\大学事项综合待办``，创建桌面/开始菜单快捷方式；数据与缓存都收在安装目录，可迁移旧数据（$([math]::Round((Get-Item $installerPath).Length / 1MB, 2)) MB） |")
 }
@@ -319,7 +319,7 @@ if ($env:GITHUB_TOKEN) {
         $ghHeaders = @{
             Authorization          = "Bearer $($env:GITHUB_TOKEN)"
             Accept                 = 'application/vnd.github+json'
-            'User-Agent'           = 'HomeworkReminder-release'
+            'User-Agent'           = 'UniversityTodos-release'
         }
         $ghApi = "https://api.github.com/repos/$githubRepo"
         $ghRelease = Test-Release -Url "$ghApi/releases/tags/$Tag" -Headers $ghHeaders
@@ -411,7 +411,7 @@ function Send-GiteaAsset {
 # 同样各自 try/catch：与 GitHub 互为镜像，任一失败不影响另一端。
 if ($env:GITEA_TOKEN) {
     try {
-        $gtHeaders = @{ Authorization = "token $($env:GITEA_TOKEN)"; 'User-Agent' = 'HomeworkReminder-release' }
+        $gtHeaders = @{ Authorization = "token $($env:GITEA_TOKEN)"; 'User-Agent' = 'UniversityTodos-release' }
         $gtRelease = Test-Release -Url "$giteaApi/releases/tags/$Tag" -Headers $gtHeaders
         if (-not $gtRelease) {
             Write-Host "   Gitea: 创建 release $Tag（先 draft，资产传完再公开）"
