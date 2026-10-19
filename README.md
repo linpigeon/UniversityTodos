@@ -4,6 +4,7 @@
 的作业、考试与公告，再加上课表与自建事项，以仿 Microsoft To Do 的 Fluent 界面呈现。
 
 > 仓库：GitHub `linpigeon/UniversityTodos` · Gitea `lin/UniversityTodos`。
+> 本地检出目录名只影响命令行里的路径，不代表仓库身份——两者可以不同，脚本与文档一律用相对路径。
 > 代码标识（程序集名、命名空间、Android 包名）仍沿用 `HomeworkReminder`，
 > 以便老用户的本地数据与自动更新不中断；安装版的数据目录改为安装目录下的 `Data`（见下文）。
 

@@ -35,7 +35,7 @@ public static class DataBackupService
     ];
 
     /// <summary>默认文件名（带时间戳，避免覆盖上一次备份）。</summary>
-    public static string SuggestedFileName() => $"HomeworkReminder-backup-{DateTime.Now:yyyyMMdd-HHmm}.zip";
+    public static string SuggestedFileName() => $"UniversityTodos-backup-{DateTime.Now:yyyyMMdd-HHmm}.zip";
 
     /// <summary>
     /// 把业务文件打包到 <paramref name="zipPath"/>，返回写入的文件数。
@@ -92,7 +92,7 @@ public static class DataBackupService
         try
         {
             var path = Path.Combine(Path.GetTempPath(),
-                $"HomeworkReminder-before-restore-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+                $"UniversityTodos-before-restore-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
             CreateBackup(dataDirectory, path);
             return path;
         }
