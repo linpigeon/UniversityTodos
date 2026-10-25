@@ -605,6 +605,17 @@ public sealed partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private int _listSortModeIndex;
 
+    /// <summary>分组按钮上的当前值（点击后弹出菜单选择）。</summary>
+    public string ListGroupButtonText => ListGroupModeIndex switch
+    {
+        1 => "分组：来源",
+        2 => "分组：课程",
+        _ => "分组：无",
+    };
+
+    /// <summary>排序按钮上的当前值。</summary>
+    public string ListSortButtonText => ListSortModeIndex == 1 ? "排序：优先级" : "排序：时间";
+
     /// <summary>
     /// 把 <see cref="List"/> 上会影响 <see cref="CanShowCourseDetail"/> 的变化转发上来。
     /// <para>
@@ -3368,6 +3379,7 @@ public sealed partial class MainViewModel : ViewModelBase
 
         AppSettings.Current.ListGroupModeIndex = normalized;
         AppSettings.Current.Save();
+        OnPropertyChanged(nameof(ListGroupButtonText));
         ApplyFilter();
     }
 
@@ -3382,6 +3394,7 @@ public sealed partial class MainViewModel : ViewModelBase
 
         AppSettings.Current.ListSortModeIndex = normalized;
         AppSettings.Current.Save();
+        OnPropertyChanged(nameof(ListSortButtonText));
         ApplyFilter();
     }
 

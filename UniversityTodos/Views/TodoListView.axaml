@@ -57,25 +57,35 @@
           </Button>
         </Grid>
 
-        <!-- 分组 / 排序：仅计划内与作业视图显示 -->
-        <Grid ColumnDefinitions="Auto,*,Auto,*" ColumnSpacing="6"
+        <!-- 分组 / 排序：仅计划内与作业视图显示。
+             不用 ComboBox：它的下拉 Popup 在离屏审计里会以未约束尺寸参与测量，
+             被误判成巨大的 Viewbox/Path；改用按钮 + MenuFlyout，只在点击时才建弹层。 -->
+        <Grid ColumnDefinitions="*,*" ColumnSpacing="8"
               IsVisible="{Binding ShowListLayoutControls}">
-          <TextBlock Grid.Column="0" Text="分组" Classes="faint" VerticalAlignment="Center" />
-          <ComboBox Grid.Column="1" SelectedIndex="{Binding ListGroupModeIndex, Mode=TwoWay}"
-                    FontSize="12" MinHeight="28" HorizontalAlignment="Stretch"
-                    ToolTip.Tip="计划内 / 作业可按来源或课程归组">
-            <ComboBoxItem>不分组</ComboBoxItem>
-            <ComboBoxItem>按来源</ComboBoxItem>
-            <ComboBoxItem>按课程</ComboBoxItem>
-          </ComboBox>
-          <TextBlock Grid.Column="2" Text="排序" Classes="faint"
-                     VerticalAlignment="Center" Margin="4,0,0,0" />
-          <ComboBox Grid.Column="3" SelectedIndex="{Binding ListSortModeIndex, Mode=TwoWay}"
-                    FontSize="12" MinHeight="28" HorizontalAlignment="Stretch"
-                    ToolTip.Tip="按优先级排序时，平台作业没有手动优先级，同优先级仍按截止时间">
-            <ComboBoxItem>按时间</ComboBoxItem>
-            <ComboBoxItem>按优先级</ComboBoxItem>
-          </ComboBox>
+          <Button Grid.Column="0" Classes="outline" Content="{Binding ListGroupButtonText}"
+                  FontSize="12" MinHeight="28" Padding="8,3"
+                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                  ToolTip.Tip="分组：不分组 / 按来源（雨课堂 / 学习通 / 批改网 / 自建）/ 按课程">
+            <Button.Flyout>
+              <MenuFlyout>
+                <MenuItem Header="不分组" Click="OnGroupNoneClick" />
+                <MenuItem Header="按来源（雨课堂 / 学习通 / 批改网 / 自建）"
+                          Click="OnGroupSourceClick" />
+                <MenuItem Header="按课程" Click="OnGroupCourseClick" />
+              </MenuFlyout>
+            </Button.Flyout>
+          </Button>
+          <Button Grid.Column="1" Classes="outline" Content="{Binding ListSortButtonText}"
+                  FontSize="12" MinHeight="28" Padding="8,3"
+                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                  ToolTip.Tip="排序：按时间 / 按优先级（平台作业无手动优先级时，同优先级仍按截止时间）">
+            <Button.Flyout>
+              <MenuFlyout>
+                <MenuItem Header="按时间" Click="OnSortTimeClick" />
+                <MenuItem Header="按优先级" Click="OnSortPriorityClick" />
+              </MenuFlyout>
+            </Button.Flyout>
+          </Button>
         </Grid>
 
         <!-- 今天的课（只在我的一天展示，来自课表展开） -->

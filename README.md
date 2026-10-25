@@ -220,20 +220,20 @@
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
   /f D:\cert.pfx /p <密码> publish\trim\UniversityTodos.Desktop.exe
 
-.\tools\build-installer.ps1 -Version 1.4.5
+.\tools\build-installer.ps1 -Version 1.4.6
 
 # 2. 再签安装包
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
-  /f D:\cert.pfx /p <密码> publish\UniversityTodos-Setup-1.4.5.exe
+  /f D:\cert.pfx /p <密码> publish\UniversityTodos-Setup-1.4.6.exe
 
 # 3. 校验签名
-signtool verify /pa /v publish\UniversityTodos-Setup-1.4.5.exe
+signtool verify /pa /v publish\UniversityTodos-Setup-1.4.6.exe
 ```
 
 > 注意：签名只能证明「发布者身份」与「文件未被篡改」；**新证书仍需要积累 SmartScreen 声誉**。
 > EV 证书通常能更快建立信任，OV 证书在下载量积累前仍可能被提示。
 > 签完 exe 后要重新打 zip / 安装包，否则发布产物里的 exe 还是未签名的那一份。
-> `release.ps1` 默认会重新 publish；签名版要么复用已签好的 `publish\UniversityTodos-<tag>-win-x64\` 并用 `-SkipBuild`，要么把签名步骤接进脚本。当前 v1.4.5 发布包仍是未签名版本。
+> `release.ps1` 默认会重新 publish；签名版要么复用已签好的 `publish\UniversityTodos-<tag>-win-x64\` 并用 `-SkipBuild`，要么把签名步骤接进脚本。当前 v1.4.6 发布包仍是未签名版本。
 ## 打包发布
 
 ```powershell
@@ -284,20 +284,20 @@ signtool verify /pa /v publish\UniversityTodos-Setup-1.4.5.exe
 
 # 2. 打包（安装包依赖 publish\trim）
 .\tools\publish.ps1 -Mode trim -NoPdb
-.\tools\build-installer.ps1 -Version 1.4.5
+.\tools\build-installer.ps1 -Version 1.4.6
 
 # 3. 一键发布：校验版本一致性 → 打包 → 生成 update-manifest.json → 上传
 $env:GITHUB_TOKEN='<GitHub 令牌>'; $env:GITEA_TOKEN='<Gitea 令牌>'
-.\tools\release.ps1 -Tag v1.4.5 -Upload `
-  -Installer .\publish\UniversityTodos-Setup-1.4.5.exe `
+.\tools\release.ps1 -Tag v1.4.6 -Upload `
+  -Installer .\publish\UniversityTodos-Setup-1.4.6.exe `
   -AndroidApk .\UniversityTodos.Android\bin\Release\net10.0-android\com.CompanyName.UniversityTodos-Signed.apk
 
 # 只校验并打包、不上传
-.\tools\release.ps1 -Tag v1.4.5
+.\tools\release.ps1 -Tag v1.4.6
 
 # 产物已生成、只想重传（例如补权限后）
-.\tools\release.ps1 -Tag v1.4.5 -SkipBuild -Upload `
-  -Installer .\publish\UniversityTodos-Setup-1.4.5.exe `
+.\tools\release.ps1 -Tag v1.4.6 -SkipBuild -Upload `
+  -Installer .\publish\UniversityTodos-Setup-1.4.6.exe `
   -AndroidApk .\UniversityTodos.Android\bin\Release\net10.0-android\com.CompanyName.UniversityTodos-Signed.apk
 ```
 

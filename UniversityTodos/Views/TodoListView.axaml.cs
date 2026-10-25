@@ -160,4 +160,31 @@ public partial class TodoListView : UserControl
     {
         Vm?.OpenAccountSettings();
     }
+
+    // 分组 / 排序用按钮 + MenuFlyout：避免 ComboBox 的 Popup 在离屏审计里
+    // 以未约束尺寸参与测量（会把整屏误判成巨大 Viewbox）。
+    private void OnGroupNoneClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is { } vm) vm.ListGroupModeIndex = 0;
+    }
+
+    private void OnGroupSourceClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is { } vm) vm.ListGroupModeIndex = 1;
+    }
+
+    private void OnGroupCourseClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is { } vm) vm.ListGroupModeIndex = 2;
+    }
+
+    private void OnSortTimeClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is { } vm) vm.ListSortModeIndex = 0;
+    }
+
+    private void OnSortPriorityClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is { } vm) vm.ListSortModeIndex = 1;
+    }
 }
