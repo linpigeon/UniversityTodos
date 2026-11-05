@@ -17,6 +17,9 @@
 * **分组与排序**：计划内 / 作业可按来源（雨课堂 / 学习通 / 批改网 / 自建）或课程分组，
   组内按截止时间或优先级排序；选择写入 `settings.json`，重启后保持
 
+* **自动优先级**：平台作业按剩余时间分为 3 天内、3–5 天、5–7 天、7 天以上，
+  逾期归入 3 天内；自建待办仍使用手动优先级
+
 * **截止提醒**：临近截止按提前量提醒、每天可发一条逾期汇总；休眠恢复后 30 分钟内会补发
 
 * **自建待办**：标题、截止时间、提醒时间、优先级、标签、备注，参与搜索/星标/我的一天与提醒
@@ -220,20 +223,20 @@
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
   /f D:\cert.pfx /p <密码> publish\trim\UniversityTodos.Desktop.exe
 
-.\tools\build-installer.ps1 -Version 1.4.6
+.\tools\build-installer.ps1 -Version 1.4.7
 
 # 2. 再签安装包
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
-  /f D:\cert.pfx /p <密码> publish\UniversityTodos-Setup-1.4.6.exe
+  /f D:\cert.pfx /p <密码> publish\UniversityTodos-Setup-1.4.7.exe
 
 # 3. 校验签名
-signtool verify /pa /v publish\UniversityTodos-Setup-1.4.6.exe
+signtool verify /pa /v publish\UniversityTodos-Setup-1.4.7.exe
 ```
 
 > 注意：签名只能证明「发布者身份」与「文件未被篡改」；**新证书仍需要积累 SmartScreen 声誉**。
 > EV 证书通常能更快建立信任，OV 证书在下载量积累前仍可能被提示。
 > 签完 exe 后要重新打 zip / 安装包，否则发布产物里的 exe 还是未签名的那一份。
-> `release.ps1` 默认会重新 publish；签名版要么复用已签好的 `publish\UniversityTodos-<tag>-win-x64\` 并用 `-SkipBuild`，要么把签名步骤接进脚本。当前 v1.4.6 发布包仍是未签名版本。
+> `release.ps1` 默认会重新 publish；签名版要么复用已签好的 `publish\UniversityTodos-<tag>-win-x64\` 并用 `-SkipBuild`，要么把签名步骤接进脚本。当前 v1.4.7 发布包仍是未签名版本。
 ## 打包发布
 
 ```powershell
@@ -251,6 +254,8 @@ signtool verify /pa /v publish\UniversityTodos-Setup-1.4.6.exe
 ```powershell
 .\UniversityTodos.Desktop.exe --selfcheck out.png   # 窗口/绑定自检 + 离屏渲染
 .\UniversityTodos.Desktop.exe --jsoncheck           # 序列化路径自检（裁剪版必过项）
+.\UniversityTodos.Desktop.exe --synccheck           # 无窗口等待首次同步完成并检查结果
+.\UniversityTodos.Desktop.exe --syncbench           # 三端同时在线获取，记录各端与总耗时（只读）
 .\UniversityTodos.Desktop.exe --installercheck      # 解析最新安装包（传目录则实际下载校验）
 .\UniversityTodos.Desktop.exe --toastcheck          # 通知链路自检
 .\UniversityTodos.Desktop.exe --selfcheck-widget w.png  # 小组件渲染自检
@@ -284,20 +289,20 @@ signtool verify /pa /v publish\UniversityTodos-Setup-1.4.6.exe
 
 # 2. 打包（安装包依赖 publish\trim）
 .\tools\publish.ps1 -Mode trim -NoPdb
-.\tools\build-installer.ps1 -Version 1.4.6
+.\tools\build-installer.ps1 -Version 1.4.7
 
 # 3. 一键发布：校验版本一致性 → 打包 → 生成 update-manifest.json → 上传
 $env:GITHUB_TOKEN='<GitHub 令牌>'; $env:GITEA_TOKEN='<Gitea 令牌>'
-.\tools\release.ps1 -Tag v1.4.6 -Upload `
-  -Installer .\publish\UniversityTodos-Setup-1.4.6.exe `
+.\tools\release.ps1 -Tag v1.4.7 -Upload `
+  -Installer .\publish\UniversityTodos-Setup-1.4.7.exe `
   -AndroidApk .\UniversityTodos.Android\bin\Release\net10.0-android\com.CompanyName.UniversityTodos-Signed.apk
 
 # 只校验并打包、不上传
-.\tools\release.ps1 -Tag v1.4.6
+.\tools\release.ps1 -Tag v1.4.7
 
 # 产物已生成、只想重传（例如补权限后）
-.\tools\release.ps1 -Tag v1.4.6 -SkipBuild -Upload `
-  -Installer .\publish\UniversityTodos-Setup-1.4.6.exe `
+.\tools\release.ps1 -Tag v1.4.7 -SkipBuild -Upload `
+  -Installer .\publish\UniversityTodos-Setup-1.4.7.exe `
   -AndroidApk .\UniversityTodos.Android\bin\Release\net10.0-android\com.CompanyName.UniversityTodos-Signed.apk
 ```
 
@@ -391,6 +396,9 @@ UniversityTodos/                 共享项目：模型、服务、视图、ViewM
                                   批改网：未完成作文列表（HTML 解析）
     AppJsonContext.cs             源生成 JSON 序列化上下文
     AutoSyncService.cs            定时同步 + 新作业判定（可脱离 UI 测试）
+    SourceSyncCoordinator.cs      三源真正并行、登录态结果与缓存合并
+    TodoCacheCoordinator.cs       按稳定 Id 复用待办 ViewModel、保留选中与本地状态
+    ManualTodoCoordinator.cs      自建待办读取与增删改协调
     Notifier.cs / WinRtToast.cs   系统通知抽象与 WinRT COM 互操作
     ---- 课表（教务系统导入）----
     Timetable.cs                  课表纯逻辑：节次时间表、单双周、周次换算、按周展开
@@ -405,7 +413,8 @@ UniversityTodos/                 共享项目：模型、服务、视图、ViewM
                                   WidgetView + WidgetWindow（桌面小组件）
   Styles/TodoTheme.axaml          仿 To Do 的 Fluent 控件样式（含深色主题）
   Styles/WidgetTheme.axaml        桌面小组件的深色半透明样式
-UniversityTodos.Desktop/         桌面宿主（启动、托盘、自检入口）
+UniversityTodos.Desktop/         桌面宿主（启动、托盘、命令行分发）
+  SelfChecks/                    主界面 / 设置 / 小组件 / 课表 / WebView / 更新等独立自检类
 UniversityTodos.Android/         Android 宿主（抽屉式外壳、原生 CookieManager 钩子）
 tools/                            构建、发布、冒烟测试脚本
 docs/                             接口实测文档与调研记录

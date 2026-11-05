@@ -24,17 +24,23 @@ public partial class TodoItemViewModel(TodoItem model) : ViewModelBase
     /// <summary>应用内标记的可读文本。</summary>
     public string DoneLabel => IsDone ? "已在应用内标记" : "未标记";
 
-    /// <summary>打开按钮文案：作业直达答题页，公告仍落到课程页。Android 上优先拉起雨课堂 App。</summary>
-    public string OpenButtonText
-    {
-        get
+    /// <summary>
+    /// 打开按钮文案：作业直达答题页，公告直达公告详情，其他类型落到课程页。
+    /// Android 上优先拉起雨课堂 App。
+    /// </summary>
+    public string OpenButtonText => OperatingSystem.IsAndroid()
+        ? Kind switch
         {
-            var isHomework = Kind == TodoKind.Homework;
-            if (OperatingSystem.IsAndroid())
-                return isHomework ? "在雨课堂中打开该作业" : "在雨课堂中打开该课程";
-            return isHomework ? "在浏览器中打开该作业" : "在浏览器中打开该课程";
+            TodoKind.Homework => "在雨课堂中打开该作业",
+            TodoKind.Announcement => "在雨课堂中打开该公告",
+            _ => "在雨课堂中打开该课程",
         }
-    }
+        : Kind switch
+        {
+            TodoKind.Homework => "在浏览器中打开该作业",
+            TodoKind.Announcement => "在浏览器中打开该公告",
+            _ => "在浏览器中打开该课程",
+        };
 
     [ObservableProperty]
     private bool _isSelected;
@@ -88,10 +94,17 @@ public partial class TodoItemViewModel(TodoItem model) : ViewModelBase
     /// <summary>是否为用户自建事项（可编辑/删除）。</summary>
     public bool IsManual => Model.IsManual;
 
-    /// <summary>优先级展示（自建事项才显示）。</summary>
+    /// <summary>自建事项显示手动优先级；平台作业显示截止区间。</summary>
     public string PriorityText => Model.PriorityText;
 
-    public bool ShowPriority => IsManual && Model.Priority != TodoPriority.Normal;
+    public bool ShowPriority => IsManual
+        ? Model.Priority != TodoPriority.Normal
+        : Kind == TodoKind.Homework && Model.EffectiveDueAt is not null;
+
+    /// <summary>列表显示所有平台作业等级；自建事项沿用原来的高优先级圆点。</summary>
+    public bool ShowPriorityBadge => IsManual
+        ? Model.Priority == TodoPriority.High
+        : ShowPriority;
 
     public bool HasNote => !string.IsNullOrWhiteSpace(Model.Note);
 
@@ -101,8 +114,8 @@ public partial class TodoItemViewModel(TodoItem model) : ViewModelBase
 
     public string TagsText => HasTags ? "# " + string.Join("  # ", Model.Tags) : string.Empty;
 
-    /// <summary>优先级为高的事项在列表里标一个点。</summary>
-    public bool IsHighPriority => Model.Priority == TodoPriority.High;
+    /// <summary>紧急与高优先级使用强调色。</summary>
+    public bool IsHighPriority => Model.EffectivePriority is TodoPriority.Urgent or TodoPriority.High;
 
     public string Id => Model.Id;
     public TodoKind Kind => Model.Kind;
@@ -161,9 +174,13 @@ public partial class TodoItemViewModel(TodoItem model) : ViewModelBase
     /// <summary>未开始 vs 进行中，用于列表里的进度徽标着色。</summary>
     public bool ShowProgress => Kind == TodoKind.Homework && Model.Total is > 0;
 
+    public void RefreshModelBindings() => OnPropertyChanged(string.Empty);
+
     public void Refresh()
     {
         OnPropertyChanged(nameof(IsOverdue));
         OnPropertyChanged(nameof(RemainingText));
+        OnPropertyChanged(nameof(PriorityText));
+        OnPropertyChanged(nameof(IsHighPriority));
     }
 }

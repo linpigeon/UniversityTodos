@@ -38,7 +38,12 @@ public static class YktUrls
                $"?university_id={universityId}&platform_id={PlatformId}&classroom_id={classroomId}";
     }
 
-    /// <summary>单条公告详情。</summary>
+    /// <summary>
+    /// 单条公告详情。<paramref name="noticeId"/> 取学习日志里 type=9 条目的
+    /// <c>courseware_id</c>（本机离线样本 26109213：日志 id=33917170、
+    /// courseware_id=9004135；前端 studentLog 的 type=9 跳转同样取该字段），
+    /// 不是日志自身的 <c>id</c>，也不是通知中心的 <c>notify_id</c>。
+    /// </summary>
     public static string Notice(long classroomId, long noticeId)
         => $"{Base}/v2/web/noticeView/{classroomId}/{noticeId}?identity=0&type=9";
 

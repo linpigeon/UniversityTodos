@@ -22,21 +22,23 @@ public sealed record ScheduleMergeResult(int Added, int Updated, int Skipped)
 /// 因此这里只做增/改，**绝不删除**既有条目。
 /// </para>
 /// <para>
-/// 匹配键为 `课程名|星期|起始节|结束节|起始周|结束周`：
+/// 匹配键为 `学期|课程名|星期|起始节|结束节|起始周|结束周|单双周`：
 /// 命中且内容有变化 → 沿用既有 Id 更新；命中且完全一致 → 跳过；未命中 → 新增。
-/// 一门课在多个时段/多个周次段上课会被拆成多条，这个键能精确区分它们。
+/// 跨学期同课程、同课程单周与双周都必须并存，因此学期与单双周也进入匹配键。
 /// </para>
 /// </summary>
 public static class ScheduleMerge
 {
     /// <summary>构造匹配键（课程名归一化：去首尾空白 + 转小写，避免大小写/空格导致重复导入）。</summary>
     public static string MatchKey(ScheduleItem item) => string.Join('|',
+        item.Term,
         item.Name.Trim().ToLowerInvariant(),
         item.Weekday,
         item.StartPeriod,
         item.EndPeriod,
         item.StartWeek,
-        item.EndWeek);
+        item.EndWeek,
+        item.WeekParity);
 
     /// <summary>匹配键一致时，判断其余可编辑字段是否也一致。</summary>
     public static bool SameContent(ScheduleItem a, ScheduleItem b) =>

@@ -168,8 +168,8 @@ public sealed partial class ChaoxingApiClient : IDisposable
     public async Task<ChaoxingCourseTaskPoints> GetPendingTaskPointsAsync(
         long courseId, long clazzId, long personId, CancellationToken ct = default)
     {
-        var url = "https://mooc1-2.chaoxing.com/visit/stucoursemiddle" +
-                  $"?courseid={courseId}&clazzid={clazzId}&vc=1&cpi={personId}";
+        var url = ChaoxingUrls.CoursePage(courseId, clazzId, personId)
+                  ?? throw new ArgumentException("课程三元组不完整，无法生成课程页地址。");
         var html = await GetAsync(url, ct, referer: "https://mooc1-2.chaoxing.com/").ConfigureAwait(false);
         return ParseTaskPoints(html, courseId);
     }

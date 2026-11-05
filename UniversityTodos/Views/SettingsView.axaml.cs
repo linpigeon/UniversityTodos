@@ -1,8 +1,11 @@
 using System;
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.VisualTree;
 using UniversityTodos.Services;
 using UniversityTodos.ViewModels;
 
@@ -11,15 +14,42 @@ namespace UniversityTodos.Views;
 /// <summary>设置页的交互（壁纸文件选择、更新确认）。</summary>
 public partial class SettingsView : UserControl
 {
+    public static readonly Avalonia.StyledProperty<bool> CompactModeProperty =
+        Avalonia.AvaloniaProperty.Register<SettingsView, bool>(nameof(CompactMode));
+
+    public bool CompactMode
+    {
+        get => GetValue(CompactModeProperty);
+        set => SetValue(CompactModeProperty, value);
+    }
+
     public SettingsView()
     {
         InitializeComponent();
+        AddHandler(PointerPressedEvent, OnTabSwipePressed, RoutingStrategies.Tunnel);
+        AddHandler(PointerReleasedEvent, OnTabSwipeReleased, RoutingStrategies.Tunnel);
 
         // 发现新版本后的「是否现在更新」确认框。
         // 由视图提供弹窗（需要 Window 作为 owner），ViewModel 只负责问「同不同意」，
         // 两者通过委托解耦。切换 DataContext 时重新挂钩，避免挂到旧的 ViewModel 上。
-        DataContextChanged += (_, _) => AttachUpdateConfirm();
+        DataContextChanged += (_, _) =>
+        {
+            AttachUpdateConfirm();
+            ApplyCompactMode();
+        };
         AttachUpdateConfirm();
+        ApplyCompactMode();
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == CompactModeProperty) ApplyCompactMode();
+    }
+
+    private void ApplyCompactMode()
+    {
+        if (Vm is { } vm) vm.PeriodsEditor.CompactMode = CompactMode;
     }
 
     /// <summary>打开课表管理（手工增删改课程 + CSV 导入）。</summary>
@@ -88,12 +118,20 @@ public partial class SettingsView : UserControl
                 return;
 
             var safety = DataBackupService.BackupBeforeRestore(AppPaths.DataDirectory);
+            if (safety is null)
+            {
+                await MessageBox.ShowAsync(owner, "无法恢复",
+                    "恢复前的自动备份失败，为保护当前数据，已中止恢复。\n"
+                    + "请先手动导出一次备份，确认可写后再重试。");
+                return;
+            }
+
             var count = DataBackupService.RestoreBackup(
                 picked[0].Path.LocalPath, AppPaths.DataDirectory);
 
-            var note = safety is null ? string.Empty : $"\n\n恢复前的数据已备份到：\n{safety}";
             await MessageBox.ShowAsync(owner, "恢复完成",
-                $"已恢复 {count} 个文件。{note}\n\n应用将退出，请重新打开。");
+                $"已恢复 {count} 个文件。\n\n恢复前的数据已备份到：\n{safety}"
+                + "\n\n应用将退出，请重新打开。");
             MainViewModel.PlatformServices?.RequestExitForUpdate();
         }
         catch (Exception ex)
@@ -128,6 +166,51 @@ public partial class SettingsView : UserControl
     }
 
     private MainViewModel? Vm => DataContext as MainViewModel;
+    private bool _trackingTabSwipe;
+    private Avalonia.Point _tabSwipeStart;
+
+    private void OnTabSwipePressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!CompactMode || !e.Pointer.IsPrimary) return;
+        if (e.Source is not Visual visual) return;
+
+        // 输入框、按钮、开关、滑块等控件保留自己的手势，不触发页面切换。
+        if (visual.FindAncestorOfType<Button>(true) is not null
+            || visual.FindAncestorOfType<ComboBox>(true) is not null
+            || visual.FindAncestorOfType<TextBox>(true) is not null
+            || visual.FindAncestorOfType<ToggleSwitch>(true) is not null
+            || visual.FindAncestorOfType<Slider>(true) is not null
+            || visual.FindAncestorOfType<NumericUpDown>(true) is not null)
+            return;
+
+        _trackingTabSwipe = true;
+        _tabSwipeStart = e.GetCurrentPoint(this).Position;
+    }
+
+    private void OnTabSwipeReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!_trackingTabSwipe || !e.Pointer.IsPrimary) return;
+        _trackingTabSwipe = false;
+
+        var end = e.GetCurrentPoint(this).Position;
+        var dx = end.X - _tabSwipeStart.X;
+        var dy = Math.Abs(end.Y - _tabSwipeStart.Y);
+        if (Math.Abs(dx) < 60 || dy > 40 || Vm is not { } vm) return;
+
+        var next = Math.Clamp(vm.SettingsTabIndex + (dx < 0 ? 1 : -1), 0, 3);
+        if (next == vm.SettingsTabIndex) return;
+
+        vm.ShowSettingsTab(next);
+        var target = next switch
+        {
+            0 => SettingsTabScroller,
+            1 => AccountTabScroller,
+            2 => TimetableTabScroller,
+            _ => AboutTabScroller,
+        };
+        SwipeTransition.Play(target, dx < 0 ? 48 : -48);
+        e.Handled = true;
+    }
 
     /// <summary>保存教务系统登录页网址（非 https 会在 ViewModel 里被拒绝并给出提示）。</summary>
     private async void OnSaveJwUrlClick(object? sender, RoutedEventArgs e)

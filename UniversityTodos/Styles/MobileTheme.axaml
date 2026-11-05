@@ -1,0 +1,526 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="using:UniversityTodos.Views"
+        xmlns:assists="clr-namespace:Material.Styles.Assists;assembly=Material.Styles"
+        xmlns:material="clr-namespace:Material.Styles.Controls;assembly=Material.Styles">
+
+  <!--
+    Android 专用补充样式，由 MobileMaterialTheme 在替换 FluentTheme 时一并加载。
+    桌面端不加载本文件：卡片边距、触摸高度、底部导航都不应影响 1180x760 的三栏界面。
+    所有颜色仍走 App.axaml 里的 Todo* DynamicResource，浅色/深色两套色板自动生效。
+  -->
+
+  <!--
+    共享移动端 Button 模板：Material 默认 Button 模板自带内边距/标签区，
+    与本文件的 MinHeight/Padding 叠加后，文字会被推高，单纯 VerticalContentAlignment
+    解决不了。这里用一个只含 Border + PART_ContentPresenter 的简洁模板，
+    所有尺寸只由按钮自身的 MinHeight/Padding 决定，内容在可用区域内真正居中。
+  -->
+  <Styles.Resources>
+    <ControlTheme x:Key="MobileButtonTheme" TargetType="Button">
+      <Setter Property="Foreground" Value="{DynamicResource TodoTextPrimary}" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{TemplateBinding CornerRadius}"
+                  Padding="{TemplateBinding Padding}"
+                  ClipToBounds="True">
+            <ContentPresenter Name="PART_ContentPresenter"
+                              Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                              HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                              HorizontalAlignment="Center"
+                              VerticalAlignment="Center"
+                              Foreground="{TemplateBinding Foreground}"
+                              FontFamily="{TemplateBinding FontFamily}"
+                              FontSize="{TemplateBinding FontSize}"
+                              FontWeight="{TemplateBinding FontWeight}"
+                              FontStyle="{TemplateBinding FontStyle}"
+                              FontStretch="{TemplateBinding FontStretch}" />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </ControlTheme>
+  </Styles.Resources>
+
+  <!-- ============ 不透明底 ============
+       壁纸在 MainView 里，列表/抽屉若用带 alpha 的面板画刷会透出壁纸，手机上正文发灰。
+       这里把列表控件与侧栏控件自身设为不透明底色；内部带 alpha 的列表画刷叠在上面，
+       只影响色调不会影响可读性。 -->
+  <Style Selector="views|TodoListView">
+    <Setter Property="Background" Value="{DynamicResource TodoDialogBackground}" />
+  </Style>
+
+  <Style Selector="views|SidebarView">
+    <Setter Property="Background" Value="{DynamicResource TodoDialogBackground}" />
+  </Style>
+
+  <!-- ============ M3 顶部栏与搜索区 ============
+       16dp 左右安全边距，标题 22dp。桌面端（DrawerMode=false）在 TodoListView 里
+       用另一组样式保留原 14/18dp 间距，因此这里不会改变桌面三栏布局。 -->
+  <Style Selector="views|TodoListView Grid.mobile-top-app-bar">
+    <Setter Property="Margin" Value="16,12,16,10" />
+  </Style>
+
+  <Style Selector="views|TodoListView TextBlock.sectionHeader">
+    <Setter Property="FontSize" Value="22" />
+  </Style>
+
+  <Style Selector="views|TodoListView StackPanel.mobile-search-region">
+    <Setter Property="Margin" Value="16,0,16,8" />
+  </Style>
+
+  <!-- ============ 待办卡片 ============
+       M3 filled card：16dp 圆角 + 语义容器色，靠底色分层，不画整圈描边。
+       浅色下 TodoSurface 是近白色，而列表底本身也是白色，卡片会与背景融成一片；
+       所以填充改用 TodoHover（浅色 #F0EFEE / 深色 #383838）——同样是现有语义色，
+       深浅两套都自带一层柔和的容器色，且不需要额外的阴影。 -->
+  <Style Selector="Border.row">
+    <Setter Property="Margin" Value="16,6" />
+    <Setter Property="CornerRadius" Value="16" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="16,12" />
+    <Setter Property="Background" Value="{DynamicResource TodoHover}" />
+  </Style>
+
+  <!-- 选中态只用淡色容器表达（M3 的 selected 容器色），不再额外描主色边。 -->
+  <Style Selector="Border.row.selected">
+    <Setter Property="Background" Value="{DynamicResource TodoSelected}" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+
+  <!-- 卡片主标题按 M3 的 body-large 档位放大到 15，截断与对比度沿用 TodoTheme。 -->
+  <Style Selector="Border.row TextBlock.title">
+    <Setter Property="FontSize" Value="15" />
+  </Style>
+
+  <!-- 已判定完成 / 本地已勾选 / 逾期等状态沿用 TodoTheme 的定义，这里不重复。 -->
+
+  <!-- 卡片副标题（todo 行第二行）在窄屏上会硬切在半句话中间；
+       加省略号让用户知道后面还有内容，也避免文字画到右侧徽标底下。 -->
+  <Style Selector="views|TodoListView TextBlock.faint">
+    <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+  </Style>
+
+  <!-- ============ 顶部工具按钮 ============
+       Compose TopAppBar 的图标按钮：静止态完全透明，48dp 圆形触摸区，
+       只靠按下/悬停时的状态层给反馈。Material 默认的 Depth1 阴影在手机上
+       会变成一张浮起的小卡片，这里显式关掉。 -->
+  <Style Selector="Button.tool">
+    <Setter Property="Theme" Value="{DynamicResource MobileButtonTheme}" />
+    <Setter Property="assists:ShadowAssist.ShadowDepth" Value="Depth0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="MinHeight" Value="48" />
+    <Setter Property="MinWidth" Value="48" />
+    <Setter Property="Padding" Value="10" />
+    <Setter Property="CornerRadius" Value="24" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+  <Style Selector="Button.tool:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TodoHover}" />
+    <Setter Property="CornerRadius" Value="24" />
+  </Style>
+  <Style Selector="Button.tool:pressed /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TodoAccentSoft}" />
+  </Style>
+
+  <!-- ============ 搜索框（M3 SearchBar） ============
+       只有列表页的搜索框走这套；设置页 TextBox 只调整底部基线（见下方），
+       不复用这里的 28dp 圆角与 44dp 图标缩进。
+       Material 模板自身是 56dp 高（含浮动标签区），本地 MinHeight=30 只是下限；
+       这里在背景容器上兜底 44，不强行压扁 56 的排版，避免文字或下划线溢出。
+       移动端另有一个 18dp 的前置放大镜（位于 TodoListView 的搜索 Grid 内），
+       因此 DrawerMode=true 时文字容器左侧让到 44dp，图标不会压住占位符。 -->
+  <Style Selector="views|TodoListView TextBox">
+    <Setter Property="Background" Value="{DynamicResource TodoHover}" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="28" />
+  </Style>
+  <Style Selector="views|TodoListView TextBox /template/ Border#PART_BackgroundTextField">
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="MinHeight" Value="44" />
+    <Setter Property="CornerRadius" Value="28" />
+    <Setter Property="Background" Value="{DynamicResource TodoHover}" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+
+  <!-- Material 的底边下划线是独立部件，BorderThickness=0 管不到它；
+       M3 SearchBar 是 filled 容器，这里把下划线整个关掉。 -->
+  <Style Selector="views|TodoListView TextBox /template/ material|MaterialUnderline#PART_Underline">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+
+  <Style Selector="views|TodoListView TextBox /template/ Panel#PART_TextContainer">
+    <Setter Property="Margin" Value="16,20,16,0" />
+  </Style>
+
+  <Style Selector="views|TodoListView[DrawerMode=True] TextBox /template/ Panel#PART_TextContainer">
+    <Setter Property="Margin" Value="44,20,16,0" />
+  </Style>
+
+  <Style Selector="views|TodoListView TextBlock.search-leading">
+    <Setter Property="Foreground" Value="{DynamicResource TodoTextSecondary}" />
+    <Setter Property="FontSize" Value="18" />
+    <Setter Property="Margin" Value="16,0,0,0" />
+  </Style>
+
+  <!-- 设置页控件统一：40dp 高、左右 12dp；文字以内容区垂直居中，
+       与外部 VerticalAlignment=Center 的标签同中线。下划线仍在底部，
+       文字不再用 Bottom 对齐去压线。只作用于 SettingsView。 -->
+  <Style Selector="views|SettingsView TextBox">
+    <Setter Property="Height" Value="40" />
+    <Setter Property="MinHeight" Value="40" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="views|SettingsView TextBox /template/ Border#PART_BackgroundTextField">
+    <Setter Property="Height" Value="40" />
+    <Setter Property="MinHeight" Value="40" />
+  </Style>
+  <Style Selector="views|SettingsView TextBox /template/ Panel#PART_TextContainer">
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Margin" Value="12,0" />
+  </Style>
+  <Style Selector="views|SettingsView NumericUpDown">
+    <Setter Property="Height" Value="40" />
+    <Setter Property="MinHeight" Value="40" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <!-- NumericUpDown 内部的 TextBox 也按内容区居中，并与左右 12dp 对齐。 -->
+  <Style Selector="views|SettingsView NumericUpDown TextBox /template/ Panel#PART_TextContainer">
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Margin" Value="12,0" />
+  </Style>
+  <Style Selector="views|SettingsView NumericUpDown TextBox">
+    <Setter Property="TextAlignment" Value="Center" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+  </Style>
+  <!-- 节次时间输入框：文字在箭头/边框以内的文字区域水平居中。 -->
+  <Style Selector="views|SettingsView TextBox.period-time">
+    <Setter Property="TextAlignment" Value="Center" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="views|SettingsView ComboBox">
+    <Setter Property="Height" Value="40" />
+    <Setter Property="MinHeight" Value="40" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Padding" Value="12,0" />
+  </Style>
+
+  <!-- ToggleSwitch 只给模板内 ContentPresenter 增加左侧间距，
+       让开关轨道/滑块与文字分开；不作用于 CheckBox 或整个 SettingsView。 -->
+  <Style Selector="views|SettingsView ToggleSwitch /template/ ContentPresenter">
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Margin" Value="14,0,0,0" />
+  </Style>
+
+  <!-- 移动端滚动条收细，避免设置页右侧灰条过粗。 -->
+  <Style Selector="ScrollBar:vertical">
+    <Setter Property="Width" Value="4" />
+  </Style>
+
+  <!-- ============ 按钮与 chip ============ -->
+  <Style Selector="Button.primary">
+    <Setter Property="Theme" Value="{DynamicResource MobileButtonTheme}" />
+    <Setter Property="assists:ShadowAssist.ShadowDepth" Value="Depth0" />
+    <Setter Property="MinHeight" Value="40" />
+    <Setter Property="CornerRadius" Value="20" />
+    <Setter Property="Padding" Value="20,10" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Button.outline">
+    <Setter Property="Theme" Value="{DynamicResource MobileButtonTheme}" />
+    <Setter Property="assists:ShadowAssist.ShadowDepth" Value="Depth0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TodoBorder}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="MinHeight" Value="40" />
+    <Setter Property="CornerRadius" Value="20" />
+    <Setter Property="Padding" Value="14,6" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.outline:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TodoHover}" />
+  </Style>
+  <Style Selector="Button.outline:pressed /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TodoAccentSoft}" />
+  </Style>
+
+  <!-- 列表里的分组/排序仍保留 12dp 圆角的 filter chip 形状。 -->
+  <Style Selector="Button.outline.chip">
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="MinHeight" Value="40" />
+  </Style>
+
+  <!-- ============ 设置页选项卡 / 课表开关 ============
+       M3 primary tabs：默认透明，active 用主色文字 + 底部 2dp 指示线，
+       不再显示整块 AccentSoft 底和 Material 默认的单卡阴影。 -->
+  <Style Selector="ToggleButton.tt-toggle">
+    <Setter Property="assists:ShadowAssist.ShadowDepth" Value="Depth0" />
+    <Setter Property="MinHeight" Value="40" />
+  </Style>
+
+  <Style Selector="Button.settab">
+    <Setter Property="Theme" Value="{DynamicResource MobileButtonTheme}" />
+    <Setter Property="assists:ShadowAssist.ShadowDepth" Value="Depth0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="BorderBrush" Value="{DynamicResource TodoAccent}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="MinHeight" Value="48" />
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="Padding" Value="14,10" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Button.settab /template/ ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.settab:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="{DynamicResource TodoHover}" />
+  </Style>
+  <Style Selector="Button.settab.active">
+    <Setter Property="Foreground" Value="{DynamicResource TodoAccent}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="BorderThickness" Value="0,0,0,2" />
+  </Style>
+  <Style Selector="Button.settab.active /template/ ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <!-- ============ 移动空状态 ============
+       圆形图标 + 暂无内容 + 可换行说明；桌面端图标/标题隐藏，只剩原文案。 -->
+  <Style Selector="views|TodoListView StackPanel.empty-state">
+    <Setter Property="MaxWidth" Value="300" />
+    <Setter Property="Spacing" Value="10" />
+  </Style>
+  <Style Selector="Border.empty-icon">
+    <Setter Property="Width" Value="72" />
+    <Setter Property="Height" Value="72" />
+    <Setter Property="CornerRadius" Value="36" />
+    <Setter Property="Background" Value="{DynamicResource TodoAccentSoft}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="Border.empty-icon TextBlock">
+    <Setter Property="FontSize" Value="28" />
+    <Setter Property="Foreground" Value="{DynamicResource TodoAccent}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+  <Style Selector="views|TodoListView TextBlock.empty-title">
+    <Setter Property="FontSize" Value="20" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TodoTextPrimary}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="TextAlignment" Value="Center" />
+  </Style>
+  <Style Selector="views|TodoListView TextBlock.empty-message">
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Foreground" Value="{DynamicResource TodoTextSecondary}" />
+    <Setter Property="LineHeight" Value="21" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="TextAlignment" Value="Center" />
+    <Setter Property="TextTrimming" Value="None" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="MaxWidth" Value="280" />
+  </Style>
+
+  <!--
+    Material 的 TextBox 模板给背景边框设了 -1 的外扩边距（原意为修正圆角渲染），
+    它会被 DataValidationErrors 裁掉 0.8dp，在遮挡审计里表现为一条无意义的裁剪缺陷。
+    这里把它收回 0：边框仍由 BorderThickness 绘制，只是不再越过父容器。
+  -->
+  <Style Selector="TextBox /template/ Border#PART_BackgroundTextField">
+    <Setter Property="Margin" Value="0" />
+  </Style>
+
+  <!-- 抽屉里的导航行：整行可点，高度对齐 Material 的 48dp 触摸目标。 -->
+  <Style Selector="Border.navrow">
+    <Setter Property="MinHeight" Value="44" />
+    <Setter Property="CornerRadius" Value="10" />
+  </Style>
+
+  <!-- ============ 底部导航（M3 NavigationBar） ============
+       选中态只画在图标背后的 64x32 pill 上，不再给整个按钮铺淡色矩形，
+       也没有顶部短指示条。移除硬分隔线，靠不透明底和 64dp 等分留白分层。 -->
+  <Style Selector="Border.mobile-nav">
+    <Setter Property="Background" Value="{DynamicResource TodoDialogBackground}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="0,2" />
+  </Style>
+
+  <Style Selector="Button.mobile-nav">
+    <Setter Property="Theme" Value="{DynamicResource MobileButtonTheme}" />
+    <Setter Property="Background" Value="Transparent" />
+    <!-- Material 默认给按钮 Depth1 阴影（视觉上像一张独立卡片），底栏必须关掉。 -->
+    <Setter Property="assists:ShadowAssist.ShadowDepth" Value="Depth0" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="0" />
+    <Setter Property="Padding" Value="0,6" />
+    <Setter Property="MinHeight" Value="60" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+
+  <!-- 未选中：整个按钮保持透明，悬停反馈只出现在 pill 上。 -->
+  <Style Selector="Button.mobile-nav /template/ ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+  <Style Selector="Button.mobile-nav:pointerover /template/ ContentPresenter">
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <!-- M3 的 active indicator：64x32 胶囊，图标居中。 -->
+  <Style Selector="Border.mobile-nav-pill">
+    <Setter Property="Width" Value="64" />
+    <Setter Property="Height" Value="32" />
+    <Setter Property="CornerRadius" Value="16" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Button.mobile-nav:pointerover Border.mobile-nav-pill">
+    <Setter Property="Background" Value="{DynamicResource TodoHover}" />
+  </Style>
+
+  <Style Selector="Button.mobile-nav TextBlock">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="TextWrapping" Value="NoWrap" />
+    <Setter Property="Foreground" Value="{DynamicResource TodoTextSecondary}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="TextAlignment" Value="Center" />
+  </Style>
+
+  <Style Selector="Button.mobile-nav TextBlock.icon">
+    <Setter Property="FontSize" Value="22" />
+    <Setter Property="Foreground" Value="{DynamicResource TodoTextSecondary}" />
+    <Setter Property="HorizontalAlignment" Value="Center" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+    <Setter Property="Margin" Value="0" />
+  </Style>
+
+  <!-- 选中态：只有 pill 上色，文字/图标换主色，标签半粗。 -->
+  <Style Selector="Button.mobile-nav.selected Border.mobile-nav-pill">
+    <Setter Property="Background" Value="{DynamicResource TodoAccentSoft}" />
+  </Style>
+  <Style Selector="Button.mobile-nav.selected:pointerover Border.mobile-nav-pill">
+    <Setter Property="Background" Value="{DynamicResource TodoAccentSoftHover}" />
+  </Style>
+  <Style Selector="Button.mobile-nav.selected TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource TodoAccent}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="Button.mobile-nav.selected TextBlock.icon">
+    <Setter Property="Foreground" Value="{DynamicResource TodoAccent}" />
+  </Style>
+
+  <!-- 节次编辑器：每节一张卡片，时间使用居中的 filled 输入框，不再显示下划线。 -->
+  <Style Selector="views|SettingsView Border.period-edit-card">
+    <Setter Property="Background" Value="{DynamicResource TodoHover}" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Padding" Value="12,8" />
+    <Setter Property="Margin" Value="0,4" />
+  </Style>
+  <Style Selector="views|SettingsView TextBox.period-time /template/ Border#PART_BackgroundTextField">
+    <Setter Property="Background" Value="{DynamicResource TodoDialogBackground}" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="views|SettingsView TextBox.period-time /template/ material|MaterialUnderline#PART_Underline">
+    <Setter Property="IsVisible" Value="False" />
+  </Style>
+
+  <!-- ============ 移动紧凑课表（七列同屏） ============
+       只作用于 CompactMode=True 的 TimetableView；桌面仍用 TimetableView.axaml
+       里的 CompactMode=False 样式与 116/78 的桌面最小宽度。 -->
+  <Style Selector="views|TimetableView[CompactMode=True] Grid.compact-header">
+    <Setter Property="Margin" Value="10,8,10,0" />
+  </Style>
+  <Style Selector="views|TimetableView[CompactMode=True] Button.tool.tt-week-arrow">
+    <Setter Property="MinWidth" Value="32" />
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Padding" Value="4" />
+    <Setter Property="CornerRadius" Value="16" />
+  </Style>
+  <Style Selector="views|TimetableView[CompactMode=True] Button.tool.tt-week-arrow TextBlock.icon">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Margin" Value="0" />
+  </Style>
+  <Style Selector="views|TimetableView[CompactMode=True] Button.outline.tt-week-current">
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Padding" Value="8,0" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="CornerRadius" Value="16" />
+  </Style>
+  <Style Selector="views|TimetableView[CompactMode=True] StackPanel.timetable-hints">
+    <Setter Property="Margin" Value="10,8,10,0" />
+  </Style>
+  <Style Selector="views|TimetableView[CompactMode=True] Grid.timetable-grid">
+    <Setter Property="Margin" Value="8,8,8,12" />
+  </Style>
+
+  <Style Selector="views|TimetableView[CompactMode=True] TextBlock.period-head">
+    <Setter Property="FontSize" Value="9" />
+    <Setter Property="Margin" Value="0,0,4,4" />
+  </Style>
+  <Style Selector="views|TimetableView[CompactMode=True] ScrollViewer.period-scroll">
+    <Setter Property="Margin" Value="0,0,4,0" />
+  </Style>
+  <Style Selector="views|TimetableView[CompactMode=True] Border.tt-period">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="0" />
+  </Style>
+
+  <Style Selector="views|TimetableView[CompactMode=True] Border.tt-dayhead">
+    <Setter Property="Margin" Value="0,1" />
+    <Setter Property="Padding" Value="1,3" />
+    <Setter Property="CornerRadius" Value="6" />
+  </Style>
+  <Style Selector="views|TimetableView[CompactMode=True] TextBlock.day-name">
+    <Setter Property="FontSize" Value="10" />
+  </Style>
+  <Style Selector="views|TimetableView[CompactMode=True] TextBlock.day-date">
+    <Setter Property="FontSize" Value="9" />
+  </Style>
+
+  <Style Selector="views|TimetableView[CompactMode=True] Border.tt-block">
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Padding" Value="4,5" />
+  </Style>
+  <Style Selector="views|TimetableView[CompactMode=True] TextBlock.course-name">
+    <Setter Property="FontSize" Value="10" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="TextTrimming" Value="None" />
+    <Setter Property="MaxLines" Value="0" />
+    <Setter Property="LineHeight" Value="12" />
+  </Style>
+  <Style Selector="views|TimetableView[CompactMode=True] TextBlock.course-location">
+    <Setter Property="FontSize" Value="9" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+    <Setter Property="TextTrimming" Value="None" />
+    <Setter Property="MaxLines" Value="0" />
+    <Setter Property="LineHeight" Value="11" />
+  </Style>
+  <Style Selector="views|TimetableView[CompactMode=True] TextBlock.course-teacher">
+    <Setter Property="FontSize" Value="9" />
+    <Setter Property="LineHeight" Value="11" />
+  </Style>
+
+  <Style Selector="views|TimetableView[CompactMode=True] ToggleButton.tt-toggle">
+    <Setter Property="MinHeight" Value="32" />
+    <Setter Property="Padding" Value="6,4" />
+    <Setter Property="CornerRadius" Value="16" />
+  </Style>
+
+</Styles>

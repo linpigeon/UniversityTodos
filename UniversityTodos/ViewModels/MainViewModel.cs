@@ -39,10 +39,8 @@ public sealed partial class MainViewModel : ViewModelBase
     private readonly ISessionStore _sessionStore;
     private readonly ILocalStateStore _localStateStore;
     private readonly ITodoCacheStore _todoCacheStore;
-    private readonly IManualTodoStore _manualTodoStore = new ManualTodoStore();
-
-    /// <summary>用户自建事项（与同步缓存分开存放）。</summary>
-    private readonly List<TodoItem> _manualTodos = [];
+    private readonly ManualTodoCoordinator _manualTodoCoordinator = new();
+    private CancellationTokenSource? _searchFilterCts;
 
     /// <summary>
     /// 供 <see cref="ReminderService"/> 读取的事项快照（UI 线程重建、后台线程读取）。
@@ -134,11 +132,11 @@ public sealed partial class MainViewModel : ViewModelBase
         [
             new NavItem("myday", "我的一天", "\uF185", "今天到期与已过期的事项"),
             new NavItem("planned", "计划内", "\uF133", "所有有截止时间的事项，可按来源/课程分组并按时间或优先级排序"),
-            // 图标：方框加一支笔（勾作业的意象）。**不能与「课程」同图标**——
+            // 图标：方框加一支笔（勾作业的意象）。**不能与「学习通网课」同图标**——
             // 两者原先都是 \uF19D（学士帽），侧栏上完全分不出来。
             new NavItem("homework", "作业", "\uF044", "全部作业及其作答进度"),
             // 课程维度：学习通每门课的未完成任务点数（粒度到小节，不拆成逐条待办）。
-            new NavItem("course", "课程", "\uF19D", "学习通各门课的未完成任务点汇总"),
+            new NavItem("course", "学习通网课", "\uF19D", "学习通各门课的未完成任务点汇总"),
             // 课表：整页覆盖展示（网格需要宽度），内容来自教务系统导入。
             // 图标用黑板：既与「计划内」的日历区分开，也贴合「上课」的意象。
             new NavItem("timetable", "课表", "\uF51B", "周课表（可从教务系统一键导入）"),
@@ -220,44 +218,20 @@ public sealed partial class MainViewModel : ViewModelBase
             var api = _api;
             if (api is null && _chaoxingCookie is null && _pigaiCookie is null) return null;
 
-            // 网络与解析放后台线程，与 RefreshAsync 保持一致。
-            var (result, localState, localStateVersion) = await Task.Run(async () =>
-            {
-                var r = api is not null
-                    ? await new SyncService(api).SyncAsync(_cacheFile, null, ct).ConfigureAwait(false)
-                    : new SyncResult();
-                // 版本号必须在读盘**之前**取：读盘本身有延迟，期间用户可能刚勾选，
-                // 那样快照已过期，但版本对比仍要能发现（晚取就会漏掉）。
-                var version = _localStateVersion;
-                var ls = await _localStateStore.LoadAsync(ct).ConfigureAwait(false);
-                return (r, ls, version);
-            }, ct).ConfigureAwait(false);
+            var localStateVersion = _localStateVersion;
+            var localStateTask = _localStateStore.LoadAsync(ct);
+            var syncTask = Task.Run(
+                () => SourceSyncCoordinator.SyncAsync(
+                    api, _cacheFile, _chaoxingCookie, _pigaiCookie, null, ct), ct);
+            await Task.WhenAll(syncTask, localStateTask).ConfigureAwait(false);
 
-            // 学习通 / 批改网同步（已登录时）。两路互不依赖，并行拉取以缩短总耗时；
-            // 各自的失败已在方法内部降级成 warnings，不会互相拖垮。
-            var cxWarnings = new List<string>();
-            // 用同一个基准时刻：界面展示的绝对截止时间与落盘的「基准 + 相对量」必须同源。
-            var cxSyncedAt = DateTimeOffset.Now;
-            var pgWarnings = new List<string>();
-
-            var cxTask = SyncChaoxingAsync(cxWarnings, cxSyncedAt, ct);
-            var pgTask = SyncPigaiAsync(pgWarnings, ct);
-            await Task.WhenAll(cxTask, pgTask).ConfigureAwait(false);
-
-            var (cxItems, cxForCache, cxCourses) = cxTask.Result;
-            var pgItems = pgTask.Result;
-
-            // 两路一起合并且只调用一次（见 MergeExtraSources 的说明）。
-            cxWarnings.AddRange(pgWarnings);
-            result = MergeExtraSources(result, cxItems, cxForCache, cxCourses, pgItems, cxWarnings);
-
+            var batch = syncTask.Result;
             ct.ThrowIfCancellationRequested();
 
-            // ApplySyncResult 必须在 UI 线程执行（清空/填充 ObservableCollection、触发 Synced）。
-            // 自动同步循环跑在线程池上、没有同步上下文可回，必须显式派发到 UI 线程。
-            await Dispatcher.UIThread.InvokeAsync(() => ApplySyncResult(result, localState, localStateVersion));
-
-            return result;
+            // 自动同步没有 UI 同步上下文，账号状态与 ObservableCollection 统一回 UI 线程更新。
+            await Dispatcher.UIThread.InvokeAsync(
+                () => ApplySyncResult(batch, localStateTask.Result, localStateVersion));
+            return batch.Result;
         }
         catch (YktAuthExpiredException)
         {
@@ -876,36 +850,6 @@ public sealed partial class MainViewModel : ViewModelBase
         }
     }
 
-    /// <summary>
-    /// 同步批改网的未完成作文。未登录返回空；失败时把原因写进 warnings
-    /// 并在状态行/设置页提示（登录态失效时要求重新登录）。
-    /// </summary>
-    private async Task<List<TodoItem>> SyncPigaiAsync(ICollection<string> warnings, CancellationToken ct)
-    {
-        if (_pigaiCookie is null) return [];
-        try
-        {
-            var items = await PigaiSyncService.SyncAsync(_pigaiCookie, ct).ConfigureAwait(false);
-            PigaiLoginService.Log($"sync: 批改网返回 {items.Count} 条未完成作文");
-            return items.ToList();
-        }
-        catch (PigaiAuthExpiredException)
-        {
-            PigaiLoginService.Log("sync: 批改网登录态已失效");
-            _pigaiCookie = null;
-            HasPigaiSession = false;
-            PigaiStatusText = "登录已过期，请到 设置 → 账号 重新登录";
-            warnings.Add("批改网登录态已失效，请重新登录。");
-            return [];
-        }
-        catch (PigaiApiException ex)
-        {
-            PigaiLoginService.Log($"sync: 批改网同步失败 {ex.Message}");
-            warnings.Add($"批改网同步失败：{ex.Message}");
-            return [];
-        }
-    }
-
     // ---------------- 学习通（超星） ----------------
 
     private readonly ChaoxingSessionStore _chaoxingStore = new();
@@ -973,104 +917,12 @@ public sealed partial class MainViewModel : ViewModelBase
         }
     }
 
-    /// <summary>
-    /// 同步学习通的作业与考试。未登录返回空；失败时把原因写进 warnings
-    /// 并在状态行/设置页提示（登录态失效时要求重新登录）。
-    /// </summary>
-    /// <param name="syncedAt">
-    /// 本次同步的时刻。由调用方传入而不是在这里取 <see cref="DateTimeOffset.Now"/>：
-    /// 学习通的截止时间是「同步时刻 + 页面上的相对剩余时间」，界面用的绝对时间与
-    /// 缓存用的「基准 + 相对量」必须是同一个基准，否则两者会互相漂移。
-    /// </param>
-    private async Task<(IReadOnlyList<TodoItem> Items, IReadOnlyList<TodoItem> ForCache,
-        IReadOnlyList<ChaoxingCourse> Courses)>
-        SyncChaoxingAsync(ICollection<string> warnings, DateTimeOffset syncedAt, CancellationToken ct)
-    {
-        if (_chaoxingCookie is null) return ([], [], []);
-        try
-        {
-            var (items, forCache) = await ChaoxingSyncService
-                .SyncAsync(_chaoxingCookie, syncedAt, ct).ConfigureAwait(false);
-
-            // 课程维度的任务点汇总。它自己内部已容错（单课失败只跳过、不抛），
-            // 只有登录态失效才抛出来。
-            var (courses, courseWarnings) = await ChaoxingSyncService
-                .SyncCoursesAsync(_chaoxingCookie, null, ct).ConfigureAwait(false);
-            foreach (var w in courseWarnings) warnings.Add(w);
-
-            return (items, forCache, courses);
-        }
-        catch (ChaoxingAuthExpiredException)
-        {
-            _chaoxingCookie = null;
-            HasChaoxingSession = false;
-            ChaoxingStatusText = "登录已过期，请到 设置 → 账号 重新登录";
-            warnings.Add("学习通登录态已失效，请重新登录。");
-            return ([], [], []);
-        }
-        catch (ChaoxingApiException ex)
-        {
-            warnings.Add($"学习通同步失败：{ex.Message}");
-            return ([], [], []);
-        }
-    }
-
-    /// <summary>
-    /// 把「附加数据源」（学习通、批改网）的条目与其告警合并进同步结果
-    /// （两路都没有条目、也没有告警时原样返回）。
-    /// <para>
-    /// 学习通条目同时进入 <see cref="SyncResult.HomeworkForCache"/> 与
-    /// <see cref="SyncResult.ChaoxingForCache"/>；批改网同理进入
-    /// <see cref="SyncResult.PigaiForCache"/>。前者是待办缓存（todos.json）的
-    /// 统一作业列表——不写进去的话，冷启动的「本地缓存秒开」永远缺这两路作业。
-    /// </para>
-    /// <para>
-    /// 两路合并**必须在同一个方法里做完**：分成两次调用的话，后一次会以自己那份
-    /// <see cref="SyncResult"/> 为基（各路 ForCache 字段在每次新建时都会被覆盖），
-    /// 把先合并进去的那一路的缓存字段丢掉。
-    /// </para>
-    /// </summary>
-    private static SyncResult MergeExtraSources(
-        SyncResult result,
-        IReadOnlyList<TodoItem> cxItems,
-        IReadOnlyList<TodoItem> cxForCache,
-        IReadOnlyList<ChaoxingCourse> cxCourses,
-        IReadOnlyList<TodoItem> pgItems,
-        IReadOnlyList<string> extraWarnings)
-    {
-        // 即使两路都没条目，课程汇总也可能有内容（例如作业都做完了但还有任务点）。
-        if (cxItems.Count == 0 && pgItems.Count == 0 && cxCourses.Count == 0
-            && extraWarnings.Count == 0) return result;
-        return new SyncResult
-        {
-            Homework = result.Homework.Concat(cxItems).Concat(pgItems).ToList(),
-            // HomeworkForCache 只放雨课堂条目：学习通/批改网各有 ChaoxingForCache / PigaiForCache。
-            // 曾经这里也把它们拼进 HomeworkForCache，而落盘时又各存一份，
-            // 冷启动再把 Homework + Chaoxing + Pigai 拼起来 → 这两路作业在首屏出现两份、
-            // 导航角标翻倍（旧缓存由 MainViewModel.MergeCachedHomework 兜底去重）。
-            HomeworkForCache = result.HomeworkForCache,
-            ChaoxingForCache = cxForCache,
-            PigaiForCache = pgItems,
-            ChaoxingCourses = cxCourses,
-            Announcements = result.Announcements,
-            CourseCount = result.CourseCount,
-            ActivityCount = result.ActivityCount,
-            UnreadNotificationCount = result.UnreadNotificationCount,
-            SyncedAt = result.SyncedAt,
-            Warnings = result.Warnings.Concat(extraWarnings).ToList(),
-            CourseSignatures = result.CourseSignatures,
-            CourseFullSyncedAt = result.CourseFullSyncedAt,
-            ReusedCourses = result.ReusedCourses,
-            ArchivedCourses = result.ArchivedCourses,
-        };
-    }
-
     /// <summary>打开课程表（按当前日期定位到本周）。</summary>
     public void OpenTimetable()
     {
         SettingsOpen = false;
-        TimetableOpen = true;
         GotoCurrentTimetableWeek();
+        TimetableOpen = true;
     }
 
     /// <summary>
@@ -1104,12 +956,7 @@ public sealed partial class MainViewModel : ViewModelBase
     public void ShiftTimetableWeek(int delta)
     {
         var next = Math.Clamp(Timetable.WeekNumber + delta, 1, Services.Timetable.MaxWeek);
-        if (next == Timetable.WeekNumber)
-        {
-            // 已经到头：仍重建一次，保证界面与数据一致（不依赖「值变化」这个副作用）。
-            RebuildTimetable();
-            return;
-        }
+        if (next == Timetable.WeekNumber) return;
         Timetable.WeekNumber = next;
     }
 
@@ -1120,11 +967,15 @@ public sealed partial class MainViewModel : ViewModelBase
             DateTime.Now.ToString("yyyy-MM-dd"), CurrentTermStartDate);
         var target = Math.Clamp(week ?? 1, 1, Services.Timetable.MaxWeek);
 
-        // 赋值触发重建只在「值真的变了」时才发生（OnWeekNumberChanged）。
-        // 首次打开课表时默认周次就是 1，若算出来也是 1 就不会触发，
-        // 表现是「课表页一片空白」——实测踩到。所以这里**显式重建**，不依赖副作用。
+        // 已经显示同一周且网格有数据时直接复用，避免每次切到课表都把整张网格重建两遍。
+        if (Timetable.WeekNumber == target && Timetable.DayHeaders.Count > 0) return;
+
+        var previous = Timetable.WeekNumber;
         Timetable.WeekNumber = target;
-        RebuildTimetable();
+
+        // 周次不变但还没有表头，说明是首次进入且默认周次恰好相同；
+        // 这时赋值不会触发 OnWeekNumberChanged，必须显式重建一次。
+        if (previous == target) RebuildTimetable();
     }
 
     /// <summary>
@@ -1549,13 +1400,20 @@ public sealed partial class MainViewModel : ViewModelBase
     /// <summary>重新通知时间相关的派生属性；跨天时额外重算筛选与角标。</summary>
     private void RefreshTimeDependentState()
     {
-        // 逐项通知：只更新已算好的文本与逾期标记，不动集合，不产生选中态抖动。
-        foreach (var item in _cache) item.Refresh();
+        // 通常只更新文本，不重建集合；跨过 3/5/7 天边界时还要重排优先级视图。
+        var priorityChanged = false;
+        foreach (var item in _cache)
+        {
+            var previousPriority = item.Model.EffectivePriority;
+            item.Refresh();
+            priorityChanged |= previousPriority != item.Model.EffectivePriority;
+        }
 
         var today = DateOnly.FromDateTime(DateTimeOffset.Now.Date);
         if (today == _lastClockDate)
         {
-            // 同一天内：只有文案变了，标题栏的「其中 N 项已过期」跟着更新即可。
+            if (priorityChanged && ListSortModeIndex == 1 && SelectedNav?.Key is "planned" or "homework")
+                ApplyFilter();
             OnPropertyChanged(nameof(ListSubtitle));
             return;
         }
@@ -1594,7 +1452,7 @@ public sealed partial class MainViewModel : ViewModelBase
         ApplyCustomProfile();
         // 必须 await：RestoreChaoxingAsync 要读盘 + DPAPI 解密，若与下面的 RefreshAsync
         // 并发，首次同步会因 _chaoxingCookie 仍为 null 而整个跳过学习通
-        // （SyncChaoxingAsync 开头就是 `if (_chaoxingCookie is null) return [];`）。
+        // （SourceSyncCoordinator 对 null cookie 会直接跳过该来源）。
         // 症状：只登录学习通的用户冷启动后列表空白，且学习通作业要等下一次自动同步才出现。
         await RestoreChaoxingAsync().ConfigureAwait(true);
         // 同理必须 await 批改网：否则首次同步会因 _pigaiCookie 仍为 null 整个跳过。
@@ -1611,8 +1469,7 @@ public sealed partial class MainViewModel : ViewModelBase
         _localState = await _localStateStore.LoadAsync().ConfigureAwait(true);
 
         // 自建事项与同步缓存分开加载；它不依赖任何登录态，先于平台数据就位。
-        _manualTodos.Clear();
-        _manualTodos.AddRange(await _manualTodoStore.LoadAsync().ConfigureAwait(true));
+        await _manualTodoCoordinator.LoadAsync().ConfigureAwait(true);
 
         // 待办先上缓存：首屏列表秒开，网络同步在后台追平。
         // 缓存加载时已做合法性校验（坏条目在 TodoCacheStore 里被丢弃）。
@@ -1638,9 +1495,8 @@ public sealed partial class MainViewModel : ViewModelBase
             });
 
             // 课程汇总同样从缓存先上，否则「课程」视图在后台同步完成前是空的。
-            List.ReplaceCourses(cachedFile.ChaoxingCourses
-                .Select(c => new ChaoxingCourseViewModel(c))
-                .OrderByDescending(c => c.HasPending)
+            List.ReplaceCourseModels(cachedFile.ChaoxingCourses
+                .OrderByDescending(c => c.PendingTaskPoints > 0)
                 .ThenByDescending(c => c.PendingTaskPoints)
                 .ThenBy(c => c.CourseName, StringComparer.CurrentCulture));
 
@@ -2879,49 +2735,20 @@ public sealed partial class MainViewModel : ViewModelBase
             // 回调仍会在 UI 线程上执行——进度文本可以安全更新。
             var progress = new Progress<string>(s => SyncStatus = s);
 
-            var api = _api;
-            var (result, localState, localStateVersion) = await Task.Run(async () =>
-            {
-                SyncResult r;
-                if (api is not null)
-                {
-                    r = await new SyncService(api).SyncAsync(_cacheFile, progress, ct).ConfigureAwait(false);
-                }
-                else
-                {
-                    // 只登录了学习通：雨课堂部分直接给空结果。
-                    r = new SyncResult();
-                }
-                // 版本号先取、再读盘（理由见 SyncForAutoAsync）。
-                var version = _localStateVersion;
-                var ls = await _localStateStore.LoadAsync(ct).ConfigureAwait(false);
-                return (r, ls, version);
-            }, ct).ConfigureAwait(true);
+            var localStateVersion = _localStateVersion;
+            var localStateTask = _localStateStore.LoadAsync(ct);
+            var syncTask = Task.Run(
+                () => SourceSyncCoordinator.SyncAsync(
+                    _api, _cacheFile, _chaoxingCookie, _pigaiCookie, progress, ct), ct);
+            await Task.WhenAll(syncTask, localStateTask).ConfigureAwait(true);
 
-            // 学习通同步（已登录时）。失败降级为警告，不影响雨课堂结果。
-            var cxWarnings = new List<string>();
-            // 与自动同步同理：绝对截止时间与缓存基准必须取同一个时刻。
-            var cxSyncedAt = DateTimeOffset.Now;
-            var pgWarnings = new List<string>();
-
-            // 两路互不依赖，并行拉取；各自的失败已在方法内部收敛成 warnings。
-            var cxTask = SyncChaoxingAsync(cxWarnings, cxSyncedAt, ct);
-            var pgTask = SyncPigaiAsync(pgWarnings, ct);
-            await Task.WhenAll(cxTask, pgTask).ConfigureAwait(true);
-
-            var (cxItems, cxForCache, cxCourses) = cxTask.Result;
-            var pgItems = pgTask.Result;
-
-            cxWarnings.AddRange(pgWarnings);
-            result = MergeExtraSources(result, cxItems, cxForCache, cxCourses, pgItems, cxWarnings);
-
+            var batch = syncTask.Result;
             ct.ThrowIfCancellationRequested();
-
-            ApplySyncResult(result, localState, localStateVersion);
+            ApplySyncResult(batch, localStateTask.Result, localStateVersion);
 
             // 手动同步也要喂给「新作业」基线：否则启动后、首次自动同步之前
             // 手动刷出的新作业会被那次同步的「首次只建基线」静默吞掉，永远收不到通知。
-            var fresh = AutoSync.Observe(result);
+            var fresh = AutoSync.Observe(batch.Result);
             if (fresh.Count > 0 && AppSettings.Current.NotifyOnNewHomework)
                 AutoSync.Notify(fresh);
 
@@ -2986,9 +2813,23 @@ public sealed partial class MainViewModel : ViewModelBase
     /// （导航角标、未读徽标、警告条、统计行）。必须在 UI 线程上调用。
     /// </para>
     /// </summary>
-    private void ApplySyncResult(SyncResult result, LocalState localState, int localStateVersionAtLoad)
+    private void ApplySyncResult(SourceSyncBatch batch, LocalState localState, int localStateVersionAtLoad)
     {
+        var result = batch.Result;
         _lastResult = result;
+
+        if (batch.ChaoxingAuthExpired)
+        {
+            _chaoxingCookie = null;
+            HasChaoxingSession = false;
+            ChaoxingStatusText = "登录已过期，请到 设置 → 账号 重新登录";
+        }
+        if (batch.PigaiAuthExpired)
+        {
+            _pigaiCookie = null;
+            HasPigaiSession = false;
+            PigaiStatusText = "登录已过期，请到 设置 → 账号 重新登录";
+        }
 
         // 同步期间用户可能刚勾选/取消勾选：后台加载到的快照已经过期。
         // 版本没变才采用快照；变了就保留内存里的（用户操作优先）——
@@ -3000,8 +2841,8 @@ public sealed partial class MainViewModel : ViewModelBase
 
         // 落盘待办缓存：下次启动秒开列表 + 作为下次增量同步的比对基准。
         // 注意用合并前（HomeworkForCache）的列表：合并会丢课堂归属，被并掉的课程下次无法增量复用。
-        // 学习通 / 批改网条目也在这里（已由 MergeExtraSources 并入 HomeworkForCache），
-        // 否则冷启动的秒开列表会永远只有雨课堂作业。
+        // 学习通 / 批改网分别写入 ChaoxingForCache / PigaiForCache，
+        // 避免冷启动合并三路缓存时重复计数。
         _cacheFile = new TodoCacheFile
         {
             SyncedAt = result.SyncedAt,
@@ -3022,9 +2863,8 @@ public sealed partial class MainViewModel : ViewModelBase
 
         // 课程维度汇总：与待办分开一条通道（见 TodoListViewModel.Courses）。
         // 有未完成任务点的排前面，其次按未完成数降序，最后按课程名。
-        List.ReplaceCourses(result.ChaoxingCourses
-            .Select(c => new ChaoxingCourseViewModel(c))
-            .OrderByDescending(c => c.HasPending)
+        List.ReplaceCourseModels(result.ChaoxingCourses
+            .OrderByDescending(c => c.PendingTaskPoints > 0)
             .ThenByDescending(c => c.PendingTaskPoints)
             .ThenBy(c => c.CourseName, StringComparer.CurrentCulture));
 
@@ -3095,12 +2935,38 @@ public sealed partial class MainViewModel : ViewModelBase
         var removed = _cache.RemoveAll(
             i => i.Model.Id.StartsWith(idPrefix, StringComparison.Ordinal));
 
+        var isChaoxing = idPrefix == "hw-cx-";
         if (_cacheFile is { } cache)
         {
             cache.Homework.RemoveAll(h => h.Id.StartsWith(idPrefix, StringComparison.Ordinal));
             cache.Chaoxing.RemoveAll(h => h.Id.StartsWith(idPrefix, StringComparison.Ordinal));
             cache.Pigai.RemoveAll(h => h.Id.StartsWith(idPrefix, StringComparison.Ordinal));
+            if (isChaoxing) cache.ChaoxingCourses.Clear();
             await _todoCacheStore.SaveAsync(cache).ConfigureAwait(true);
+        }
+
+        if (isChaoxing) List.ReplaceCourseModels([]);
+        if (_lastResult is { } last)
+        {
+            _lastResult = new SyncResult
+            {
+                Homework = last.Homework.Where(
+                    h => !h.Id.StartsWith(idPrefix, StringComparison.Ordinal)).ToList(),
+                HomeworkForCache = last.HomeworkForCache,
+                ChaoxingForCache = isChaoxing ? [] : last.ChaoxingForCache,
+                PigaiForCache = isChaoxing ? last.PigaiForCache : [],
+                ChaoxingCourses = isChaoxing ? [] : last.ChaoxingCourses,
+                Announcements = last.Announcements,
+                CourseCount = last.CourseCount,
+                ActivityCount = last.ActivityCount,
+                UnreadNotificationCount = last.UnreadNotificationCount,
+                SyncedAt = last.SyncedAt,
+                Warnings = last.Warnings,
+                CourseSignatures = last.CourseSignatures,
+                CourseFullSyncedAt = last.CourseFullSyncedAt,
+                ReusedCourses = last.ReusedCourses,
+                ArchivedCourses = last.ArchivedCourses,
+            };
         }
 
         ApplyFilter();
@@ -3114,39 +2980,14 @@ public sealed partial class MainViewModel : ViewModelBase
         // 记住最近一次用于展示的结果：增删自建事项后要按它重建列表，
         // 否则冷启动尚未同步时新增一条自建事项会把缓存里的平台条目弄丢。
         _lastResult = result;
+        var selectedId = SelectedItem?.Id;
+        var reconciled = TodoCacheCoordinator.Reconcile(
+            _cache, result, _manualTodoCoordinator.Items, _localState);
         _cache.Clear();
+        _cache.AddRange(reconciled.Items);
 
-        foreach (var hw in result.Homework)
-        {
-            _cache.Add(new TodoItemViewModel(hw)
-            {
-                IsDone = _localState.Done.Contains(hw.Id),
-                IsStarred = _localState.Starred.Contains(hw.Id),
-                InMyDay = _localState.InMyDay.Contains(hw.Id),
-            });
-        }
-
-        foreach (var ann in result.Announcements)
-        {
-            _cache.Add(new TodoItemViewModel(ann)
-            {
-                IsDone = _localState.ReadAnnouncements.Contains(ann.Id) || ann.IsRead,
-                IsStarred = _localState.Starred.Contains(ann.Id),
-                InMyDay = _localState.InMyDay.Contains(ann.Id),
-            });
-        }
-
-        // 自建事项排在后面：它们不参与平台作业的完成状态/进度展示，但同样进列表、筛选与提醒。
-        foreach (var manual in _manualTodos)
-        {
-            _cache.Add(new TodoItemViewModel(manual)
-            {
-                IsDone = _localState.Done.Contains(manual.Id),
-                IsStarred = _localState.Starred.Contains(manual.Id),
-                InMyDay = _localState.InMyDay.Contains(manual.Id),
-            });
-        }
-
+        if (selectedId is not null)
+            SelectedItem = _cache.FirstOrDefault(i => i.Id == selectedId);
         RefreshReminderSnapshot();
     }
 
@@ -3174,7 +3015,35 @@ public sealed partial class MainViewModel : ViewModelBase
     partial void OnSearchTextChanged(string value)
     {
         OnPropertyChanged(nameof(IsSearching));
-        ApplyFilter();
+        _searchFilterCts?.Cancel();
+
+        // 清空搜索立即恢复列表；连续输入只保留最后一次筛选，避免每个字符都重建集合。
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            ApplyFilter();
+            return;
+        }
+
+        var cts = _searchFilterCts = new CancellationTokenSource();
+        _ = DebounceApplyFilterAsync(cts);
+    }
+
+    private async Task DebounceApplyFilterAsync(CancellationTokenSource cts)
+    {
+        try
+        {
+            await Task.Delay(300, cts.Token).ConfigureAwait(true);
+            if (!cts.IsCancellationRequested) ApplyFilter();
+        }
+        catch (OperationCanceledException)
+        {
+            // 被后续输入取代。
+        }
+        finally
+        {
+            if (ReferenceEquals(_searchFilterCts, cts)) _searchFilterCts = null;
+            cts.Dispose();
+        }
     }
 
     /// <summary>关键词匹配：标题/课程/学科/备注/标签任一命中即可。</summary>
@@ -3270,27 +3139,26 @@ public sealed partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// 「计划内」排序：按时间升序，或按优先级降序；另一维作为并列时的次序。
-    /// 自建事项才有手动优先级，平台事项恒为普通。
+    /// 「计划内」排序：按时间升序，或按有效优先级降序；另一维作为并列时的次序。
+    /// 自建事项使用手动优先级，平台作业使用截止区间对应的自动优先级。
     /// </summary>
     private IEnumerable<TodoItemViewModel> OrderPlanned(IEnumerable<TodoItemViewModel> items)
     {
         return ListSortModeIndex == 1
-            ? items.OrderByDescending(i => (int)i.Model.Priority)
+            ? items.OrderByDescending(i => (int)i.Model.EffectivePriority)
                    .ThenBy(i => i.Model.EffectiveDueAt ?? DateTimeOffset.MaxValue)
             : items.OrderBy(i => i.Model.EffectiveDueAt)
-                   .ThenByDescending(i => (int)i.Model.Priority);
+                   .ThenByDescending(i => (int)i.Model.EffectivePriority);
     }
 
     /// <summary>
-    /// 「作业」排序：已完成的永远排在后面（与原先口径一致），未完成内部再按时间或优先级排。
-    /// 平台作业没有手动优先级（恒为 Normal），所以「按优先级」在这里会退化为按截止时间。
+    /// 「作业」排序：已完成的永远排在后面（与原先口径一致），未完成内部再按时间或有效优先级排。
     /// </summary>
     private IEnumerable<TodoItemViewModel> OrderHomework(IEnumerable<TodoItemViewModel> items)
     {
         var byStatus = items.OrderBy(i => i.Model.Status == TodoStatus.Completed ? 1 : 0);
         return ListSortModeIndex == 1
-            ? byStatus.ThenByDescending(i => (int)i.Model.Priority)
+            ? byStatus.ThenByDescending(i => (int)i.Model.EffectivePriority)
                       .ThenBy(i => i.Model.EffectiveDueAt ?? DateTimeOffset.MaxValue)
             : byStatus.ThenBy(i => i.Model.EffectiveDueAt ?? DateTimeOffset.MaxValue);
     }
@@ -3448,62 +3316,29 @@ public sealed partial class MainViewModel : ViewModelBase
     /// <summary>新建自建事项。返回新事项的 id（标题为空时返回 null）。</summary>
     public async Task<string?> AddManualTodoAsync(ManualTodoDraft draft)
     {
-        var title = (draft.Title ?? string.Empty).Trim();
-        if (title.Length == 0) return null;
-
-        var item = new TodoItem
-        {
-            Id = $"man-{Guid.NewGuid():N}",
-            Kind = TodoKind.Custom,
-            Title = title,
-            CourseName = string.Empty,
-            Status = TodoStatus.NotStarted,
-            DueAt = draft.DueAt,
-            Priority = draft.Priority,
-            Tags = ManualTodoStore.NormalizeTags(draft.Tags),
-            Note = string.IsNullOrWhiteSpace(draft.Note) ? null : draft.Note.Trim(),
-            RemindAt = draft.RemindAt,
-        };
-
-        _manualTodos.Add(item);
-        await _manualTodoStore.SaveAsync(_manualTodos).ConfigureAwait(true);
-        RebuildAfterManualChange(item.Id);
-        return item.Id;
+        var id = await _manualTodoCoordinator.AddAsync(draft).ConfigureAwait(true);
+        if (id is not null) RebuildAfterManualChange(id);
+        return id;
     }
 
     /// <summary>编辑自建事项（平台事项不从这里改）。</summary>
     public async Task UpdateManualTodoAsync(TodoItem item, ManualTodoDraft draft)
     {
         if (!item.IsManual) return;
-        var target = _manualTodos.FirstOrDefault(i => i.Id == item.Id);
-        if (target is null) return;
-
-        var title = (draft.Title ?? string.Empty).Trim();
-        if (title.Length == 0) return;
-
-        target.Title = title;
-        target.DueAt = draft.DueAt;
-        target.Priority = draft.Priority;
-        target.Tags = ManualTodoStore.NormalizeTags(draft.Tags);
-        target.Note = string.IsNullOrWhiteSpace(draft.Note) ? null : draft.Note.Trim();
-        target.RemindAt = draft.RemindAt;
-
-        await _manualTodoStore.SaveAsync(_manualTodos).ConfigureAwait(true);
-        RebuildAfterManualChange(target.Id);
+        if (await _manualTodoCoordinator.UpdateAsync(item.Id, draft).ConfigureAwait(true))
+            RebuildAfterManualChange(item.Id);
     }
 
     /// <summary>删除自建事项，并清掉它在本地状态里的标记。</summary>
     public async Task DeleteManualTodoAsync(TodoItem item)
     {
-        if (_manualTodos.RemoveAll(i => i.Id == item.Id) == 0) return;
+        if (!await _manualTodoCoordinator.DeleteAsync(item.Id).ConfigureAwait(true)) return;
 
         _localState.Done.Remove(item.Id);
         _localState.Starred.Remove(item.Id);
         _localState.InMyDay.Remove(item.Id);
         _localStateVersion++;
-
         await _localStateStore.SaveAsync(_localState).ConfigureAwait(true);
-        await _manualTodoStore.SaveAsync(_manualTodos).ConfigureAwait(true);
         RebuildAfterManualChange(null);
     }
 
@@ -3546,7 +3381,7 @@ public sealed partial class MainViewModel : ViewModelBase
     /// <summary>「打开」按钮的提示文案：Android 优先拉起雨课堂 App。</summary>
     public string OpenSourceTooltip => OperatingSystem.IsAndroid()
         ? "在雨课堂 App 中打开（未安装则回落浏览器）"
-        : "在浏览器中打开：作业直达答题页，公告落到课程日志页";
+        : "在浏览器中打开：作业直达答题页，公告直达公告详情页";
 
     /// <summary>应用内 WebView 打开的答题页地址（Android；null = 不显示 WebView 页）。</summary>
     [ObservableProperty]
@@ -3580,8 +3415,26 @@ public sealed partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// 打开学习通课程首页。
+    /// Android 沿用作业/考试的内嵌 WebView（与学习通登录页共享 cookie），
+    /// 桌面则交给平台实现打开系统浏览器；不拉起雨课堂 App。
+    /// </summary>
+    public void OpenChaoxingCourse(ChaoxingCourseViewModel course)
+    {
+        if (course.CourseUrl is not { } url) return;
+
+        if (OperatingSystem.IsAndroid() && TryBuildMobileExamUrl(url) is { } mobileUrl)
+        {
+            ExamWebUrl = mobileUrl;
+            return;
+        }
+
+        PlatformServices?.OpenUrl(url);
+    }
+
+    /// <summary>
     /// 能在应用内 WebView 打开的页面：v2 web 的试卷/章节作业（同域 cookie），
-    /// 以及学习通的作业/考试页（WebView 与登录页共享 cookie 存储）。
+    /// 以及学习通的作业/考试/课程页（WebView 与登录页共享 cookie 存储）。
     /// 不是这类链接时返回 null（走拉起雨课堂 App / 浏览器）。
     /// 注意不能换成 changjiang-exam 的旧考试系统地址：它是独立 token 会话（401）。
     /// </summary>

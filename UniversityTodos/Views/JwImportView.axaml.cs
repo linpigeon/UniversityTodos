@@ -30,6 +30,8 @@ public partial class JwImportView : UserControl
 
     private NativeWebDialog? _dialog;
     private bool _running;
+    private bool _adapterCreated;
+    private bool _dialogShown;
     private CancellationTokenSource? _ballCts;
 
     /// <summary>
@@ -42,10 +44,9 @@ public partial class JwImportView : UserControl
     /// <summary>
     /// 是否已经为本弹窗发起过首次导航。
     /// <para>
-    /// 首次导航必须等 <c>AdapterCreated</c> 之后再发：<c>Show()</c> 返回时适配器往往还没建好，
-    /// 此时 <c>Navigate</c> 可能不被受理，页面就会一直停在空白——而空白页恰恰是
-    /// 「脚本不能执行」的状态，于是功能整体不可用。批改网登录页同样是
-    /// 「AdapterCreated 之后再 Navigate」（见 <see cref="PigaiLoginView"/>）。
+    /// 首次导航必须同时等 <c>AdapterCreated</c> 与 <c>Show()</c> 完成：
+    /// Android 实测 AdapterCreated 早于 Show 返回，在 Show 之前 Navigate 会丢失，
+    /// 页面一直空白且没有 NavigationStarted/Completed。
     /// </para>
     /// </summary>
     private bool _initialNavigationStarted;
@@ -56,6 +57,17 @@ public partial class JwImportView : UserControl
     }
 
     private MainViewModel? Vm => DataContext as MainViewModel;
+
+    /// <summary>
+    /// 首次导航必须同时满足：适配器已创建且弹窗已经 Show 完成。
+    /// Android 实测 AdapterCreated 会早于 Show 返回；在 Show 之前 Navigate 会丢失，
+    /// 页面停在空白，也不会有 NavigationStarted/Completed。
+    /// </summary>
+    private void TryNavigateInitial(MainViewModel vm)
+    {
+        if (!_adapterCreated || !_dialogShown) return;
+        NavigateToLoginPage(vm);
+    }
 
     protected override void OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
     {
@@ -119,6 +131,8 @@ public partial class JwImportView : UserControl
         // 每次重开都是新弹窗：首次导航与页面就绪状态都要跟着重置，
         // 否则会带着上一个弹窗的「已就绪」状态去撞新页面的加载期。
         _initialNavigationStarted = false;
+        _adapterCreated = false;
+        _dialogShown = false;
         _pageGate.Reset();
 
         _dialog = dialog;
@@ -127,12 +141,13 @@ public partial class JwImportView : UserControl
 
         dialog.AdapterCreated += (_, _) =>
         {
+            _adapterCreated = true;
             JwCaptureService.Log("AdapterCreated");
             vm.SetTimetableStatus(string.Empty);
             _pageGate.MarkAdapterCreated();
 
-            // 适配器就绪后才发首次导航（原先紧跟 Show()，属于抢跑，见字段注释）。
-            NavigateToLoginPage(vm);
+            // 适配器可能早于 Show 就绪：这里只记录，真正 Navigate 等 Show 完成后再发。
+            TryNavigateInitial(vm);
         };
         dialog.AdapterDestroyed += (_, _) => JwCaptureService.Log("AdapterDestroyed");
 
@@ -184,15 +199,20 @@ public partial class JwImportView : UserControl
             {
                 // 还没挂上可视树就没有 owner 可依附；交给下次可视化时再开。
                 vm.SetTimetableStatus("界面尚未就绪，请稍后重试。");
+                _dialogShown = false;
+                _adapterCreated = false;
                 _dialog = null;
                 MainViewModel.JwDialogAccessor = null;
                 MainViewModel.JwPageGate = null;
                 return;
             }
             dialog.Show(owner);
+            _dialogShown = true;
         }
         catch (Exception ex)
         {
+            _dialogShown = false;
+            _adapterCreated = false;
             vm.SetTimetableStatus($"无法打开教务窗口：{ex.Message}");
             JwCaptureService.Log($"Show 失败: {ex.Message}");
             _dialog = null;
@@ -202,6 +222,7 @@ public partial class JwImportView : UserControl
         }
 
         vm.JwWindowStateText = "窗口已打开，正在加载登录页…";
+        TryNavigateInitial(vm);
 
         // 这里就把注入循环启起来（它会在闸门关闭期间按兵不动），
         // 于是「适配器没建好」「页面没加载完」这些阶段也都还有状态可看、可诊断。
@@ -209,8 +230,8 @@ public partial class JwImportView : UserControl
     }
 
     /// <summary>
-    /// 打开教务登录页。<b>只能在 <c>AdapterCreated</c> 之后调用</b>——抢跑会丢掉这次导航，
-    /// 页面停在空白，脚本能力也就无从谈起。
+    /// 打开教务登录页。<b>只能在 AdapterCreated 且 Show() 完成后调用</b>——抢跑会丢掉这次导航，
+    /// 页面停在空白，脚本能力也就无从谈起。由 <see cref="TryNavigateInitial"/> 统一把关。
     /// </summary>
     private void NavigateToLoginPage(MainViewModel vm)
     {
@@ -265,6 +286,9 @@ public partial class JwImportView : UserControl
     private void CloseDialog()
     {
         StopBallLoop();
+        _dialogShown = false;
+        _adapterCreated = false;
+        _initialNavigationStarted = false;
         var dialog = _dialog;
         _dialog = null;
         MainViewModel.JwDialogAccessor = null;
@@ -309,7 +333,7 @@ public partial class JwImportView : UserControl
 
     private async Task RunAsync(MainViewModel vm, CancellationToken ct)
     {
-        // 首次导航不在这里发——必须等 AdapterCreated（见 NavigateToLoginPage 的注释）。
+        // 首次导航不在这里发——必须等 AdapterCreated 与 Show 都完成（见 NavigateToLoginPage 的注释）。
         var dialog = _dialog;
         if (dialog is null) { _running = false; return; }
 

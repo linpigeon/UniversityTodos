@@ -29,6 +29,8 @@ public partial class TodoListView : UserControl
         set => SetValue(DrawerModeProperty, value);
     }
 
+    public event EventHandler? AddTodoRequested;
+
     private MainViewModel? Vm => DataContext as MainViewModel;
 
     private void OnToggleSidebarClick(object? sender, RoutedEventArgs e)
@@ -112,6 +114,12 @@ public partial class TodoListView : UserControl
         if (Vm is not { } vm) return;
         try
         {
+            if (DrawerMode)
+            {
+                AddTodoRequested?.Invoke(this, EventArgs.Empty);
+                return;
+            }
+
             if (TopLevel.GetTopLevel(this) is not Window owner) return;
             var draft = await TodoEditorWindow.ShowAsync(owner, null);
             if (draft is null) return;

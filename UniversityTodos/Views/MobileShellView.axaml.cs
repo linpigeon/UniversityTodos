@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
@@ -21,30 +22,16 @@ public partial class MobileShellView : UserControl
     {
         InitializeComponent();
         DataContextChanged += (_, _) => HookVm(DataContext as MainViewModel);
-        ExamWebView.AdapterCreated += (_, _) =>
-        {
-            _examWebReady = true;
-            NavigateExamWeb();
-        };
-        ExamWebView.AdapterDestroyed += (_, _) => _examWebReady = false;
-        ExamWebView.NavigationCompleted += async (_, _) =>
-        {
-            // 页面是桌面布局（左侧菜单 + 宽卡片），手机屏放不下：把布局视口钉到 1000px，
-            // WebView 自动整体缩放适配屏幕；顺手藏掉「浏览器不受支持」提示条。
-            try
-            {
-                await ExamWebView.InvokeScript(
-                    "(()=>{var m=document.querySelector('meta[name=\"viewport\"]');" +
-                    "if(!m){m=document.createElement('meta');m.name='viewport';(document.head||document.documentElement).appendChild(m);}" +
-                    "m.setAttribute('content','width=1000');" +
-                    "var h=document.getElementById('ie-hint');if(h)h.style.display='none';" +
-                    "return 'ok';})()");
-            }
-            catch (Exception) { /* 视觉退化不影响使用 */ }
-        };
+        MobileTodoList.AddTodoRequested += (_, _) => OpenManualEditor();
+        MobileTodoList.AddHandler(PointerPressedEvent, OnTodoPointerPressed, RoutingStrategies.Tunnel);
+        MobileTodoList.AddHandler(PointerReleasedEvent, OnTodoPointerReleased, RoutingStrategies.Tunnel);
     }
 
+    private NativeWebView? _examWebView;
+    private TimetableView? _timetableView;
     private bool _examWebReady;
+    private bool _trackingDrawerGesture;
+    private Avalonia.Point _drawerGestureStart;
 
     /// <summary>当前挂上的 PropertyChanged 处理器；退订必须用同一个委托实例。</summary>
     private System.ComponentModel.PropertyChangedEventHandler? _vmHandler;
@@ -69,9 +56,34 @@ public partial class MobileShellView : UserControl
         _vmHandler = (_, e) =>
         {
             if (e.PropertyName == nameof(MainViewModel.ExamWebUrl))
+            {
                 NavigateExamWeb();
+            }
+            else if (e.PropertyName == nameof(MainViewModel.LoginPageOpen))
+            {
+                UpdateLoginPage();
+            }
+            else if (e.PropertyName == nameof(MainViewModel.DrawerOpen))
+            {
+                if (vm.DrawerOpen) SwipeTransition.Play(DrawerPanel, -300);
+            }
+            else if (e.PropertyName == nameof(MainViewModel.TimetableOpen))
+            {
+                UpdateTimetablePage();
+                SyncMobileNav();
+            }
+            else if (e.PropertyName is nameof(MainViewModel.SelectedNav)
+                     or nameof(MainViewModel.SettingsOpen))
+            {
+                // 底部导航的选中态只跟随这几个属性，没有额外的导航状态。
+                SyncMobileNav();
+            }
         };
         vm.PropertyChanged += _vmHandler;
+        SyncMobileNav();
+        UpdateTimetablePage();
+        UpdateLoginPage();
+        if (vm.ExamWebUrl is not null) NavigateExamWeb();
     }
 
     private void UnhookVm()
@@ -86,6 +98,10 @@ public partial class MobileShellView : UserControl
         base.OnDetachedFromVisualTree(e);
         UnhookVm();
         UnhookBackRequested();
+        CloseExamWebView();
+        TimetableContentHost.Content = null;
+        _timetableView = null;
+        LoginContentHost.Content = null;
     }
 
     private Avalonia.Controls.TopLevel? _hookedTopLevel;
@@ -106,6 +122,8 @@ public partial class MobileShellView : UserControl
     protected override void OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
+        // DataContext 可能在构造之后才由父级传下来；这里补一次同步，订阅仍只走 HookVm。
+        SyncMobileNav();
         UnhookBackRequested();
         if (Avalonia.Controls.TopLevel.GetTopLevel(this) is { } top)
         {
@@ -125,27 +143,206 @@ public partial class MobileShellView : UserControl
     {
         if (Vm is not { } vm) return;
 
-        // 顺序与叠放层次一致（后加的在上）：登录页 → 答题页 → 设置 → 详情 → 课表 → 抽屉。
+        // 顺序与叠放层次一致（后加的在上）：编辑器 → 登录页 → 答题页 → 教务导入 → 设置 → 详情 → 课表 → 抽屉。
+        if (ManualEditorOverlay.IsVisible) { CloseManualEditor(); e.Handled = true; return; }
         if (vm.LoginPageOpen is not null) { vm.CloseLoginPage(); e.Handled = true; return; }
         if (vm.ExamWebUrl is not null) { vm.CloseExamWeb(); e.Handled = true; return; }
+        if (vm.JwImportOpen) { vm.CloseJwImport(); e.Handled = true; return; }
         if (vm.SettingsOpen) { vm.SettingsOpen = false; e.Handled = true; return; }
         if (vm.SelectedItem is not null) { vm.SelectedItem = null; e.Handled = true; return; }
         if (vm.TimetableOpen) { vm.CloseTimetable(); e.Handled = true; return; }
         if (vm.DrawerOpen) { vm.DrawerOpen = false; e.Handled = true; }
     }
 
+    private void UpdateTimetablePage()
+    {
+        if (Vm?.TimetableOpen != true)
+        {
+            TimetableContentHost.Content = null;
+            return;
+        }
+
+        _timetableView ??= new TimetableView { CompactMode = true };
+        if (!ReferenceEquals(TimetableContentHost.Content, _timetableView))
+            TimetableContentHost.Content = _timetableView;
+    }
+
+    private void UpdateLoginPage()
+    {
+        if (Vm is not { } vm) return;
+
+        LoginContentHost.Content = vm.LoginPageOpen switch
+        {
+            "ykt" => new LoginView(),
+            "chaoxing" => new ChaoxingLoginView(),
+            "pigai" => new PigaiLoginView(),
+            _ => null,
+        };
+    }
+
+    private void EnsureExamWebView()
+    {
+        if (_examWebView is not null) return;
+
+        var webView = new NativeWebView();
+        webView.AdapterCreated += (_, _) =>
+        {
+            _examWebReady = true;
+            NavigateExamWeb();
+        };
+        webView.AdapterDestroyed += (_, _) => _examWebReady = false;
+        webView.NavigationCompleted += async (_, _) =>
+        {
+            // 页面是桌面布局，手机屏放不下：固定布局视口后整体缩放。
+            try
+            {
+                await webView.InvokeScript(
+                    "(()=>{var m=document.querySelector('meta[name=\"viewport\"]');" +
+                    "if(!m){m=document.createElement('meta');m.name='viewport';(document.head||document.documentElement).appendChild(m);}" +
+                    "m.setAttribute('content','width=1000');" +
+                    "var h=document.getElementById('ie-hint');if(h)h.style.display='none';" +
+                    "return 'ok';})()");
+            }
+            catch (Exception) { /* 视觉退化不影响使用 */ }
+        };
+
+        _examWebView = webView;
+        ExamWebHost.Children.Add(webView);
+    }
+
+    private void CloseExamWebView()
+    {
+        _examWebReady = false;
+        if (_examWebView is not null) ExamWebHost.Children.Remove(_examWebView);
+        _examWebView = null;
+    }
+
     /// <summary>打开应用内答题页：先把会话 cookie 铺到 exam 子域，再导航。</summary>
     private void NavigateExamWeb()
     {
+        if (Vm?.ExamWebUrl is not { } url)
+        {
+            CloseExamWebView();
+            return;
+        }
+
+        EnsureExamWebView();
         // WebView 适配器异步创建，未就绪时等 AdapterCreated 再导航。
-        if (!_examWebReady || Vm?.ExamWebUrl is not { } url) return;
+        if (!_examWebReady || _examWebView is not { } webView) return;
 
-        // 平台专属动作（Android：changjiang → changjiang-exam 子域铺 cookie）。
-        // 放平台钩子里而不是 if (OperatingSystem.IsAndroid())：共享项目里不该出现
-        // Android 的 CookieManager，否则本文件又只能编译进 Android 头。
         MainViewModel.PlatformServices?.PrepareExamWebSession();
+        webView.Navigate(new Uri(url));
+    }
 
-        ExamWebView.Navigate(new Uri(url));
+    /// <summary>
+    /// 底部导航点击：待办统一映射到 NavItems 的 key=all，
+    /// 课表/设置复用原逻辑；不复制筛选逻辑，也不新增业务导航状态。
+    /// </summary>
+    private void OnMobileNavClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is not { } vm) return;
+        if ((sender as Button)?.Tag is not string key || string.IsNullOrEmpty(key)) return;
+
+        if (key == "settings")
+        {
+            // 课表打开时用户仍能从底栏进设置。先按正常语义关闭课表
+            // （恢复打开课表前的列表），否则返回后 SelectedNav 会停在 timetable，
+            // 而课表页已经关掉，底栏与列表内容对不上。
+            if (vm.TimetableOpen) vm.CloseTimetable();
+            vm.OpenSettings();
+        }
+        else
+        {
+            var navKey = key == "todo" ? "all" : key;
+            var nav = vm.NavItems.FirstOrDefault(n => n.Key == navKey);
+            if (nav is null) return;
+            vm.SelectedNav = nav;
+            vm.OnNavChanged();
+        }
+
+        SyncMobileNav();
+    }
+
+    /// <summary>
+    /// 把三个底部按钮的 selected class 与当前状态对齐。
+    /// <para>
+    /// 设置页打开时高亮“设置”；课表页打开时高亮“课表”；其余任何列表筛选
+    /// （myday / homework / planned / all 等）都高亮“待办”。只改 class，
+    /// 不维护第二份导航状态。
+    /// </para>
+    /// </summary>
+    private void SyncMobileNav()
+    {
+        var vm = Vm;
+        var key = vm?.SettingsOpen == true
+            ? "settings"
+            : vm?.TimetableOpen == true
+                ? "timetable"
+                : "todo";
+
+        TodoNavButton.Classes.Set("selected", key == "todo");
+        TimetableNavButton.Classes.Set("selected", key == "timetable");
+        SettingsNavButton.Classes.Set("selected", key == "settings");
+    }
+
+    private void OpenManualEditor()
+    {
+        if (Vm is null) return;
+
+        CloseManualEditor();
+        var form = new TodoEditorForm(null, mobile: true);
+        ManualEditorOverlay.Child = form.View;
+        ManualEditorOverlay.IsVisible = true;
+        form.Completed += async (_, _) =>
+        {
+            var draft = form.Result;
+            CloseManualEditor();
+            if (draft is null || Vm is not { } vm) return;
+
+            try
+            {
+                await vm.AddManualTodoAsync(draft);
+            }
+            catch (Exception ex)
+            {
+                SidebarView.ReportHandlerFailure(vm, "新建待办", ex);
+            }
+        };
+    }
+
+    private void CloseManualEditor()
+    {
+        ManualEditorOverlay.IsVisible = false;
+        ManualEditorOverlay.Child = null;
+    }
+
+    private void OnTodoPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.Pointer.IsPrimary || Vm is not { } vm || vm.DrawerOpen
+            || vm.SettingsOpen || vm.TimetableOpen || vm.JwImportOpen || vm.SelectedItem is not null)
+            return;
+
+        _trackingDrawerGesture = true;
+        _drawerGestureStart = e.GetCurrentPoint(MobileTodoList).Position;
+    }
+
+    private void OnTodoPointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!_trackingDrawerGesture || !e.Pointer.IsPrimary) return;
+        _trackingDrawerGesture = false;
+        if (Vm is not { } vm || vm.DrawerOpen) return;
+
+        var end = e.GetCurrentPoint(MobileTodoList).Position;
+        var dx = end.X - _drawerGestureStart.X;
+        var dy = Math.Abs(end.Y - _drawerGestureStart.Y);
+        if (dy > 40) return;
+
+        // 主列表向左滑直接呼出；同时保留主流系统的左边缘右滑手势。
+        if (dx <= -60 || (dx >= 60 && _drawerGestureStart.X <= 24))
+        {
+            vm.DrawerOpen = true;
+            e.Handled = true;
+        }
     }
 
     /// <summary>点抽屉遮罩：收起抽屉。</summary>

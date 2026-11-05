@@ -174,8 +174,16 @@ static List<string> VerifyUrls()
         if (course.Contains(bad)) failures.Add($"课程链接含不存在的路由段 {bad}：{course}");
     }
 
-    var notice = YktUrls.Notice(26109213, 15546425);
-    if (!notice.Contains("/v2/web/noticeView/26109213/15546425")) failures.Add($"公告链接异常：{notice}");
+    // 真实学习日志样本（26109213）：type=9 日志 id=33917170，noticeId=courseware_id=9004135。
+    var logNotice = YktUrls.Notice(26109213, 9004135);
+    if (!logNotice.Contains("/v2/web/noticeView/26109213/9004135"))
+        failures.Add($"公告链接异常：{logNotice}");
+    if (!logNotice.Contains("identity=0") || !logNotice.Contains("type=9"))
+        failures.Add($"公告链接缺少 identity/type 参数：{logNotice}");
+
+    // 用户给出的正确 URL 形态：classroomId=26109238、noticeId=9443023。
+    var notice = YktUrls.Notice(26109238, 9443023);
+    if (!notice.Contains("/v2/web/noticeView/26109238/9443023")) failures.Add($"公告链接异常：{notice}");
 
     return failures;
 }

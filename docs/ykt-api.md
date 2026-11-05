@@ -350,11 +350,20 @@ https://changjiang.yuketang.cn/v2/web/studentLog/{room}?university_id=3214&platf
 **包括 `/v2/web/errpage` 本身**。所以「GET 一下看是不是 200」完全无法判断路由是否存在，
 必须查路由表，或在真实浏览器里看最终渲染结果。
 
-### 深链的未验证部分
+### 深链参数
 
-- **单条公告**：`/noticeView/{room}/{noticeid}` 需要 `noticeid`。学习日志里 type=9 的 `id`
-  与通知中心的 `notify_id` 不是同一体系，没有实测确认该传哪个，因此当前实现不起用深链，
-  统一回落到课程日志页。
+- **单条公告**：`/noticeView/{room}/{noticeid}?identity=0&type=9`，`noticeid` 取学习日志里
+  type=9 条目的 `courseware_id`——不是日志自身的 `id`，也不是通知中心的 `notify_id`。
+  证据有两处：
+  1. 本机离线抓取的学习日志（2026-09-16，classroom 26109213）type=9 条目为
+     `id=33917170`、`courseware_id="9004135"`，两个 id 明显不同；
+  2. 前端 `student-corpus.js` 的 studentLog 跳转代码对 type=9 使用
+     `noticeid: this.tableData.courseware_id`。
+  用户反馈的正确 URL 示例是 `/v2/web/noticeView/26109238/9443023`。
+  同步时按 `courseware_id` 生成 `SourceUrl`，并把解析出的值持久化为 `NoticeId`；
+  缺失、非数字或不为正数时回落课程日志页，不拿日志 id 猜详情。旧缓存没有 `NoticeId`，
+  无法离线还原正确值：其中遗留的 `noticeView` 一律作废并回落课程页，等下一次成功同步刷新。
+  该路由来自前端路由表；本次改动未做真实账号的线上点击验证。
 - **作业深链（2026-09-28 已验证，见 `YktUrls.cs`）**：
   - 试卷类（type=5）：`/exam/{cid}/{courseware_id}`——`eid` 是日志的 `courseware_id`
     （字符串形态），用户实测 `/v2/web/exam/26109213/2144775` 直达答题页；

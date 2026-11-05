@@ -89,15 +89,19 @@ public static class TimetableLayout
     /// <param name="availableWidth">可用宽度（控件宽度 - 节次刻度列）。</param>
     /// <param name="dayCount">显示几天。</param>
     /// <param name="maxColumnsInAnyDay">任一天里的最大分栏数（无课冲突时为 1）。</param>
-    public static double RequiredDaysWidth(double availableWidth, int dayCount, int maxColumnsInAnyDay)
+    /// <param name="minDayWidth">单天最小宽度；默认桌面可读值，移动紧凑模式传更小的值。</param>
+    /// <param name="minColumnWidth">分栏后的单栏最小宽度；默认桌面可读值，移动紧凑模式传更小的值。</param>
+    public static double RequiredDaysWidth(
+        double availableWidth, int dayCount, int maxColumnsInAnyDay,
+        double minDayWidth = MinDayWidth, double minColumnWidth = MinColumnWidth)
     {
         var days = Math.Clamp(dayCount, 1, 7);
         var columns = Math.Max(1, maxColumnsInAnyDay);
-        var perDay = Math.Max(MinDayWidth, availableWidth <= 0
-            ? MinDayWidth
+        var perDay = Math.Max(minDayWidth, availableWidth <= 0
+            ? minDayWidth
             : (availableWidth - (days - 1) * ColumnGap) / days);
         var total = days * perDay + (days - 1) * ColumnGap;
-        return Math.Max(total, days * (columns * MinColumnWidth + (columns - 1) * ColumnGap) + (days - 1) * ColumnGap);
+        return Math.Max(total, days * (columns * minColumnWidth + (columns - 1) * ColumnGap) + (days - 1) * ColumnGap);
     }
 
     /// <summary>一个课块在画布上的矩形（X/Y/宽/高，像素）。</summary>

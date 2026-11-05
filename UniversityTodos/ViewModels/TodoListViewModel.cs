@@ -80,15 +80,57 @@ public sealed partial class TodoListViewModel : ViewModelBase
     /// <summary>有未完成任务点的课程数。</summary>
     public int CoursesWithPending => Courses.Count(c => c.HasPending);
 
-    /// <summary>课程视图：替换整份课程列表。</summary>
+    /// <summary>按课程稳定键增量更新，保留未变化的行与当前选中课程。</summary>
+    public void ReplaceCourseModels(IEnumerable<ChaoxingCourse> courses) =>
+        ReplaceCourses(courses.Select(c => new ChaoxingCourseViewModel(c)));
+
+    /// <summary>按课程稳定键增量更新，保留未变化的行与当前选中课程。</summary>
     public void ReplaceCourses(IEnumerable<ChaoxingCourseViewModel> courses)
     {
-        Courses.Clear();
-        foreach (var c in courses) Courses.Add(c);
+        var previous = SelectedCourse;
+        var previousKey = previous is null ? (0L, 0L) : (previous.Model.CourseId, previous.Model.ClazzId);
+        if (previous is not null)
+        {
+            previous.IsSelected = false;
+            SelectedCourse = null;
+        }
+        var existing = Courses
+            .GroupBy(c => (c.Model.CourseId, c.Model.ClazzId))
+            .ToDictionary(g => g.Key, g => g.First());
+        var desired = courses.Select(incoming =>
+        {
+            if (existing.TryGetValue((incoming.Model.CourseId, incoming.Model.ClazzId), out var current)
+                && (ReferenceEquals(current.Model, incoming.Model) || CourseEquivalent(current.Model, incoming.Model)))
+            {
+                if (ReferenceEquals(current.Model, incoming.Model)) current.RefreshModelBindings();
+                return current;
+            }
+            return incoming;
+        }).ToList();
+
+        SynchronizeCollection(Courses, desired);
+        if (previous is not null)
+            SelectedCourse = Courses.FirstOrDefault(c =>
+                (c.Model.CourseId, c.Model.ClazzId) == previousKey);
+
         OnPropertyChanged(nameof(CourseCount));
         OnPropertyChanged(nameof(CoursesWithPending));
         OnPropertyChanged(nameof(HasAnyContent));
     }
+
+    private static bool CourseEquivalent(ChaoxingCourse left, ChaoxingCourse right) =>
+        left.CourseId == right.CourseId
+        && left.ClazzId == right.ClazzId
+        && left.PersonId == right.PersonId
+        && left.CourseName == right.CourseName
+        && left.ClazzName == right.ClazzName
+        && left.IsRetired == right.IsRetired
+        && left.PendingTaskPoints == right.PendingTaskPoints
+        && left.Leaves.Count == right.Leaves.Count
+        && left.Leaves.Zip(right.Leaves).All(pair =>
+            pair.First.ChapterNumber == pair.Second.ChapterNumber
+            && pair.First.Name == pair.Second.Name
+            && pair.First.PendingCount == pair.Second.PendingCount);
 
     /// <summary>当前选中的课程（课程视图的详情栏依据）。</summary>
     [ObservableProperty]
@@ -137,8 +179,7 @@ public sealed partial class TodoListViewModel : ViewModelBase
 
     public void Replace(IEnumerable<TodoItemViewModel> items)
     {
-        Items.Clear();
-        foreach (var i in items) Items.Add(i);
+        SynchronizeCollection(Items, items.ToList());
         Rebuild();
     }
 
@@ -159,10 +200,10 @@ public sealed partial class TodoListViewModel : ViewModelBase
             i.GroupLabel = string.Empty;
         }
 
-        VisibleItems.Clear();
+        var ordered = new List<TodoItemViewModel>(visible.Count);
         if (GroupMode == TodoGroupMode.None || visible.Count == 0)
         {
-            foreach (var i in visible) VisibleItems.Add(i);
+            ordered.AddRange(visible);
         }
         else
         {
@@ -177,25 +218,45 @@ public sealed partial class TodoListViewModel : ViewModelBase
             {
                 var members = group.Select(x => x.item).ToList();
                 var label = $"{group.Key} · {members.Count} 项";
-
-                for (var index = 0; index < members.Count; index++)
-                {
-                    if (index == 0)
-                    {
-                        members[index].IsGroupStart = true;
-                        members[index].GroupLabel = label;
-                    }
-
-                    VisibleItems.Add(members[index]);
-                }
+                members[0].IsGroupStart = true;
+                members[0].GroupLabel = label;
+                ordered.AddRange(members);
             }
         }
 
+        SynchronizeCollection(VisibleItems, ordered);
         OnPropertyChanged(nameof(Count));
         OnPropertyChanged(nameof(HasItems));
         OnPropertyChanged(nameof(OverdueCount));
         OnPropertyChanged(nameof(DueTodayCount));
         OnPropertyChanged(nameof(HasAnyContent));
+    }
+
+    internal static void SynchronizeCollection<T>(ObservableCollection<T> target, IReadOnlyList<T> desired)
+    {
+        var desiredSet = new HashSet<T>(desired);
+        for (var i = target.Count - 1; i >= 0; i--)
+        {
+            if (!desiredSet.Contains(target[i])) target.RemoveAt(i);
+        }
+
+        for (var i = 0; i < desired.Count; i++)
+        {
+            if (i < target.Count && ReferenceEquals(target[i], desired[i])) continue;
+
+            var existingIndex = -1;
+            for (var j = i + 1; j < target.Count; j++)
+            {
+                if (ReferenceEquals(target[j], desired[i]))
+                {
+                    existingIndex = j;
+                    break;
+                }
+            }
+
+            if (existingIndex >= 0) target.Move(existingIndex, i);
+            else target.Insert(i, desired[i]);
+        }
     }
 
     /// <summary>分组键：按课程时自建事项统一归到「自建待办」，平台事项用学科名。</summary>

@@ -25,6 +25,8 @@
     <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="Avalonia.Fonts.Inter" />
     <PackageReference Include="CommunityToolkit.Mvvm" />
+    <!-- Android 端 Material 主题；桌面端不加载（见 Views/MobileMaterialTheme.cs）。 -->
+    <PackageReference Include="Material.Avalonia" />
     <!-- 登录页内嵌雨课堂官方登录页，需要 WebView 控件。 -->
     <PackageReference Include="Avalonia.Controls.WebView" />
   </ItemGroup>

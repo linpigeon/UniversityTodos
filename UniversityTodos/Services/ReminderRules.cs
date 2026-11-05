@@ -74,7 +74,8 @@ public static class ReminderRules
             if (item.RemindAt is { } remindAt)
             {
                 var explicitKey = ExplicitKey(item, remindAt);
-                if (remindAt <= now && !remindedExplicit.Contains(explicitKey))
+                if (!remindedExplicit.Contains(explicitKey)
+                    && WithinWindow(now, lastCheckAt, remindAt, 0))
                     hits.Add(new ReminderHit(ReminderKind.Explicit, item, remindAt, 0));
                 continue;
             }

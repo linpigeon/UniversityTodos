@@ -69,8 +69,36 @@ public sealed class TodoItem
     /// <summary>雨课堂站内的原始链接，便于跳回原页面。增量校验路径会按新日志重建，故可写。</summary>
     public string? SourceUrl { get; set; }
 
-    /// <summary>自建事项的优先级（平台事项恒为 Normal）。</summary>
+    /// <summary>
+    /// 公告详情页使用的 notice id（学习日志 type=9 的 <c>courseware_id</c>）。
+    /// 只有公告有值；持久化它是为了让冷启动缓存能重建正确深链——
+    /// 旧缓存没有这个字段，不能用日志 id 反推。
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? NoticeId { get; set; }
+
+    /// <summary>持久化的手动优先级。平台事项保持 Normal，展示与排序使用 <see cref="EffectivePriority"/>。</summary>
     public TodoPriority Priority { get; set; } = TodoPriority.Normal;
+
+    /// <summary>
+    /// 实际参与展示与排序的优先级：自建事项使用手动值；平台作业按剩余时间分为
+    /// 3 天内（紧急）、3–5 天（高）、5–7 天（普通）、7 天以上（低）。
+    /// 逾期作业归入 3 天内；无截止时间的平台作业保持普通。
+    /// </summary>
+    [JsonIgnore]
+    public TodoPriority EffectivePriority => GetEffectivePriority(DateTimeOffset.Now);
+
+    internal TodoPriority GetEffectivePriority(DateTimeOffset now)
+    {
+        if (Kind != TodoKind.Homework) return Priority;
+        if (EffectiveDueAt is not { } due) return TodoPriority.Normal;
+
+        var remaining = due - now;
+        if (remaining <= TimeSpan.FromDays(3)) return TodoPriority.Urgent;
+        if (remaining <= TimeSpan.FromDays(5)) return TodoPriority.High;
+        if (remaining <= TimeSpan.FromDays(7)) return TodoPriority.Normal;
+        return TodoPriority.Low;
+    }
 
     /// <summary>自建事项的标签（平台事项为空）。</summary>
     public List<string> Tags { get; set; } = [];
@@ -99,14 +127,23 @@ public sealed class TodoItem
     [JsonIgnore]
     public bool IsManual => Kind == TodoKind.Custom;
 
-    /// <summary>优先级的展示文本。</summary>
+    /// <summary>优先级的展示文本；平台作业直接显示对应的截止区间。</summary>
     [JsonIgnore]
-    public string PriorityText => Priority switch
-    {
-        TodoPriority.High => "高优先级",
-        TodoPriority.Low => "低优先级",
-        _ => "普通",
-    };
+    public string PriorityText => !IsManual && Kind == TodoKind.Homework && EffectiveDueAt is not null
+        ? EffectivePriority switch
+        {
+            TodoPriority.Urgent => "3 天内",
+            TodoPriority.High => "3–5 天",
+            TodoPriority.Normal => "5–7 天",
+            _ => "7 天以上",
+        }
+        : Priority switch
+        {
+            TodoPriority.Urgent => "紧急",
+            TodoPriority.High => "高优先级",
+            TodoPriority.Low => "低优先级",
+            _ => "普通",
+        };
 
     /// <summary>应用内的已读状态（雨课堂单条已读没有服务端接口，仅 user_read_all 可反写）。</summary>
     public bool IsRead { get; set; }

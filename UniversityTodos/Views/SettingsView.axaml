@@ -399,15 +399,19 @@
               <ItemsControl ItemsSource="{Binding PeriodsEditor.Rows}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="vm:PeriodRowViewModel">
-                    <Grid ColumnDefinitions="64,116,18,116,Auto,Auto" ColumnSpacing="6" Margin="0,3">
+                    <Grid>
+                    <Grid ColumnDefinitions="64,116,18,116,Auto,Auto" ColumnSpacing="6" Margin="0,3"
+                          IsVisible="{Binding !CompactMode}">
                       <TextBlock Grid.Column="0" VerticalAlignment="Center" FontSize="12"
                                  Foreground="{DynamicResource TodoTextSecondary}"
                                  Text="{Binding Period, StringFormat='第 {0} 节'}" />
-                      <TextBox Grid.Column="1" Text="{Binding StartTime, Mode=TwoWay}"
+                      <TextBox Grid.Column="1" Classes="period-time"
+                               Text="{Binding StartTime, Mode=TwoWay}"
                                FontSize="12" PlaceholderText="08:00" />
                       <TextBlock Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Center"
                                  FontSize="12" Foreground="{DynamicResource TodoTextTertiary}" Text="—" />
-                      <TextBox Grid.Column="3" Text="{Binding EndTime, Mode=TwoWay}"
+                      <TextBox Grid.Column="3" Classes="period-time"
+                               Text="{Binding EndTime, Mode=TwoWay}"
                                FontSize="12" PlaceholderText="08:45" />
                       <TextBlock Grid.Column="4" VerticalAlignment="Center" FontSize="11" Margin="6,0,0,0"
                                  IsVisible="{Binding HasDisabledHint}"
@@ -424,11 +428,43 @@
                                 ToolTip.Tip="恢复这一节的时间" />
                       </StackPanel>
                     </Grid>
+
+                    <Border Classes="period-edit-card" IsVisible="{Binding CompactMode}">
+                      <Grid RowDefinitions="Auto,Auto,Auto">
+                        <Grid Grid.Row="0" ColumnDefinitions="*,Auto">
+                          <TextBlock Grid.Column="0" VerticalAlignment="Center" FontSize="13" FontWeight="SemiBold"
+                                     Foreground="{DynamicResource TodoTextPrimary}"
+                                     Text="{Binding Period, StringFormat='第 {0} 节'}" />
+                          <StackPanel Grid.Column="1" Orientation="Horizontal">
+                            <Button Classes="tool" Content="停用" Padding="8,3" FontSize="11"
+                                    Click="OnDisablePeriodClick" IsVisible="{Binding !IsDisabled}"
+                                    ToolTip.Tip="把这一节设为 00:00-00:00（停用）" />
+                            <Button Classes="tool" Content="启用" Padding="8,3" FontSize="11"
+                                    Click="OnEnablePeriodClick" IsVisible="{Binding IsDisabled}"
+                                    ToolTip.Tip="恢复这一节的时间" />
+                          </StackPanel>
+                        </Grid>
+                        <Grid Grid.Row="1" ColumnDefinitions="*,Auto,*" ColumnSpacing="8" Margin="0,6,0,0">
+                          <TextBox Grid.Column="0" Classes="period-time" Text="{Binding StartTime, Mode=TwoWay}"
+                                   FontSize="13" PlaceholderText="08:00" />
+                          <TextBlock Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center"
+                                     FontSize="12" Foreground="{DynamicResource TodoTextTertiary}" Text="—" />
+                          <TextBox Grid.Column="2" Classes="period-time" Text="{Binding EndTime, Mode=TwoWay}"
+                                   FontSize="13" PlaceholderText="08:45" />
+                        </Grid>
+                        <TextBlock Grid.Row="2" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
+                                   IsVisible="{Binding HasDisabledHint}"
+                                   Foreground="{DynamicResource TodoTextTertiary}"
+                                   Text="{Binding DisabledHint}" />
+                      </Grid>
+                    </Border>
+                    </Grid>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
 
-              <StackPanel Orientation="Horizontal" Spacing="8">
+              <StackPanel Orientation="Horizontal" Spacing="8"
+                          IsVisible="{Binding !PeriodsEditor.CompactMode}">
                 <Button Classes="outline" Content="新增一节" Padding="10,5" FontSize="12"
                         Click="OnAddPeriodClick" />
                 <Button Classes="outline" Content="删除末节" Padding="10,5" FontSize="12"
@@ -438,6 +474,17 @@
                 <Button Classes="primary" Content="保存时间表" Padding="12,5" FontSize="12"
                         Click="OnSavePeriodsClick" />
               </StackPanel>
+              <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto" ColumnSpacing="8" RowSpacing="8"
+                    IsVisible="{Binding PeriodsEditor.CompactMode}">
+                <Button Grid.Row="0" Grid.Column="0" Classes="outline" Content="新增一节"
+                        Click="OnAddPeriodClick" />
+                <Button Grid.Row="0" Grid.Column="1" Classes="outline" Content="删除末节"
+                        Click="OnRemovePeriodClick" />
+                <Button Grid.Row="1" Grid.Column="0" Classes="outline" Content="恢复默认"
+                        Click="OnResetPeriodsClick" />
+                <Button Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Classes="primary" Content="保存时间表"
+                        Click="OnSavePeriodsClick" />
+              </Grid>
 
               <!-- 校验失败要显眼：写坏时间表会让整张课表的时间都错 -->
               <TextBlock FontSize="12" TextWrapping="Wrap" IsVisible="{Binding PeriodsEditor.HasStatus}"

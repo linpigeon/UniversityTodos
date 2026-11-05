@@ -206,6 +206,12 @@ public sealed class SyncService(IYktApi api) : ISyncService
             // 公告直接来自学习日志：type=9，hasRead 是唯一可靠的未读信号。
             foreach (var act in activities.Where(a => a.Type == YktActivityType.Announcement))
             {
+                // 公告详情页的 notice id 取学习日志 type=9 的 courseware_id。
+                // 依据：本机离线学习日志样本 26109213 的 type=9 条目
+                // id=33917170、courseware_id="9004135"；前端 studentLog 对 type=9 的
+                // 跳转同样取 tableData.courseware_id。日志自身的 id 与通知中心
+                // notify_id 都不是这个身份。
+                var noticeId = PositiveId(act.CoursewareId);
                 announcements.Add(new TodoItem
                 {
                     Id = $"ann-{course.ClassroomId}-{act.Id}",
@@ -217,9 +223,12 @@ public sealed class SyncService(IYktApi api) : ISyncService
                     PublishedAt = FromUnixMs(act.CreateTime.OrZero),
                     Status = TodoStatus.Unknown,
                     IsRead = act.HasRead ?? false,
-                    // 公告详情页需要 notice id；日志 id 与通知中心的 notify_id 不同源，
-                    // 没有实测确认，因此统一落到课程日志页（公告页签就在那里）。
-                    SourceUrl = YktUrls.CourseLog(course.ClassroomId, api.Session.UniversityId),
+                    // 落盘 noticeId：下次冷启动可据此重建深链，不依赖链接字符串。
+                    NoticeId = noticeId,
+                    // 拿不到合法 courseware_id 时回落课程日志页，不拿日志 id 猜。
+                    SourceUrl = noticeId is { } id
+                        ? YktUrls.Notice(course.ClassroomId, id)
+                        : YktUrls.CourseLog(course.ClassroomId, api.Session.UniversityId),
                 });
             }
 
@@ -428,6 +437,10 @@ public sealed class SyncService(IYktApi api) : ISyncService
             ArchivedCourses = archivedInTerm,
         };
     }
+
+    /// <summary>把日志的 courseware_id 解析为正数 id；缺失、非数字或不为正数时返回 null。</summary>
+    private static long? PositiveId(string? raw)
+        => long.TryParse(raw, CultureInfo.InvariantCulture, out var id) && id > 0 ? id : null;
 
     /// <summary>
     /// 作业的直达链接。试卷类（type=5）用日志的 courseware_id（用户实测直达答题页）；

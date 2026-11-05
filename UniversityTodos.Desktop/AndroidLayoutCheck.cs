@@ -7,6 +7,8 @@ using System.Text;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Interactivity;
+using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
@@ -82,6 +84,9 @@ internal static class AndroidLayoutCheck
 
         App.DeferInitialLoad = true;
         App.MobileShellFactory = () => new MobileShellView();
+        // 与 AndroidApp 完全相同的主题钩子：审计必须真实覆盖 MaterialTheme + MobileTheme，
+        // 否则截图验到的是桌面 Fluent 样式，对 Android 上线界面没有说服力。
+        App.MobileThemeHook = MobileMaterialTheme.Apply;
 
         var builder = Program.BuildAvaloniaApp();
         builder.SetupWithoutStarting();
@@ -99,10 +104,15 @@ internal static class AndroidLayoutCheck
         var sizes = ParseSizes();
         var sheets = new List<Sheet>();
         var fatal = new List<string>();
+        var navChecks = new List<string>();
 
         try
         {
             AuditShell(vm, mobile: true, sizes, outDir, includeWebViewStates, sheets, fatal);
+
+            // 深色主题单独补一张列表截图：浅色通过不代表 Material 的深色配色正确。
+            AuditDarkList(vm, new Size(360, 780), outDir, sheets, fatal);
+
             if (includeDesktopShell)
             {
                 // 桌面外壳在同尺寸下不参与（MinWidth=960），但「窄屏该走哪套外壳」
@@ -112,6 +122,10 @@ internal static class AndroidLayoutCheck
                 // 还是上一次那个外壳（实测这里踩过：桌面那轮量的是移动外壳）。
                 AuditShell(vm, mobile: false, [new Size(960, 760)], outDir, false, sheets, fatal);
             }
+
+            // 放在所有截图之后：这里会调用 OnNavChanged 改 EmptyMessage，
+            // 提前跑会让后面的桌面空状态屏继承「还没有雨课堂账号…」这句长文案。
+            RunMobileNavSelfCheck(vm, navChecks, fatal);
         }
         catch (Exception ex)
         {
@@ -120,7 +134,7 @@ internal static class AndroidLayoutCheck
             return 1;
         }
 
-        var report = BuildReport(sheets, fatal);
+        var report = BuildReport(sheets, fatal, navChecks);
         var reportPath = Path.Combine(outDir, "android-layout-report.md");
         File.WriteAllText(reportPath, report, Encoding.UTF8);
         Console.WriteLine(report);
@@ -150,6 +164,164 @@ internal static class AndroidLayoutCheck
         }
 
         return list.Count > 0 ? list : [new Size(360, 780)];
+    }
+
+    /// <summary>
+    /// 深色主题的列表截图。浅色通过不代表 Material 的深色配色没问题：
+    /// 主题切换走生产同一条 <see cref="MainViewModel.ThemeModeIndex"/> 路径，
+    /// MaterialTheme 的 BaseTheme=Inherit 会跟随 RequestedThemeVariant。
+    /// 跑完恢复用户原来的主题设置。
+    /// </summary>
+    private static void AuditDarkList(
+        MainViewModel vm, Size size, string outDir, List<Sheet> sheets, List<string> fatal)
+    {
+        var previous = vm.ThemeModeIndex;
+        try
+        {
+            vm.ThemeModeIndex = 1;
+            Pump(4);
+
+            var state = new ScreenState("list-dark", "待办列表（深色主题 / Material 配色）", _ => { });
+            sheets.Add(RenderOne(vm, state, size, outDir, v => new MainView { DataContext = v }));
+        }
+        catch (Exception ex)
+        {
+            fatal.Add($"深色列表 {size.Width:0}x{size.Height:0}：{ex.GetType().Name} {ex.Message}");
+        }
+        finally
+        {
+            vm.ThemeModeIndex = previous;
+            Pump(2);
+        }
+    }
+
+    /// <summary>
+    /// 底部导航的真实 UI 事件自检：构造移动外壳后**实际点击**三个按钮，
+    /// 断言 SelectedNav / SettingsOpen / TimetableOpen 与 selected class，
+    /// 再用 <see cref="TopLevel.BackRequestedEvent"/> 走一遍原来的返回逻辑。
+    /// 只构造按钮不点击是测不到 CodeBehind 接线的。
+    /// </summary>
+    private static void RunMobileNavSelfCheck(
+        MainViewModel vm, List<string> checks, List<string> fatal)
+    {
+        ResetState(vm);
+        vm.SelectedNav = vm.NavItems.First(n => n.Key == "homework");
+        vm.OnNavChanged();
+        vm.SettingsOpen = false;
+        vm.TimetableOpen = false;
+        vm.DrawerOpen = false;
+        vm.SelectedItem = null;
+
+        var shell = new MobileShellView { DataContext = vm };
+        var window = new Window
+        {
+            Width = 400,
+            Height = 820,
+            CanResize = false,
+            ShowInTaskbar = false,
+            Background = Brushes.White,
+            Content = shell,
+            DataContext = vm,
+        };
+
+        var failures = 0;
+        void Check(bool ok, string what)
+        {
+            checks.Add($"{(ok ? "PASS" : "FAIL")} · {what}");
+            if (!ok) failures++;
+        }
+
+        try
+        {
+            window.Show();
+            Pump(6);
+
+            var todo = Find("TodoNavButton");
+            var timetable = Find("TimetableNavButton");
+            var settings = Find("SettingsNavButton");
+
+            Button Find(string name) => shell.FindControl<Button>(name)
+                ?? throw new InvalidOperationException($"找不到底部导航按钮 {name}");
+
+            void Click(Button button)
+            {
+                button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
+                Pump(2);
+            }
+
+            void Back()
+            {
+                window.RaiseEvent(new RoutedEventArgs(TopLevel.BackRequestedEvent));
+                Pump(2);
+            }
+
+            static bool Selected(Button button) => button.Classes.Contains("selected");
+
+            Check(Selected(todo) && !Selected(timetable) && !Selected(settings)
+                  && vm.SelectedNav?.Key == "homework",
+                "初始：作业列表下「待办」选中（课表/设置未选中）");
+
+            Click(todo);
+            Check(vm.SelectedNav?.Key == "all" && !vm.SettingsOpen && !vm.TimetableOpen
+                  && Selected(todo) && !Selected(timetable) && !Selected(settings),
+                "点击「待办」：映射到 SelectedNav=all，待办按钮选中");
+
+            // 任意列表筛选（不只 all）都应保持待办选中。
+            vm.SelectedNav = vm.NavItems.First(n => n.Key == "myday");
+            vm.OnNavChanged();
+            Pump(2);
+            Check(vm.SelectedNav?.Key == "myday"
+                  && Selected(todo) && !Selected(timetable) && !Selected(settings),
+                "切到 myday 列表：待办按钮仍选中");
+
+            Click(timetable);
+            Check(vm.TimetableOpen && vm.SelectedNav?.Key == "timetable"
+                  && Selected(timetable) && !Selected(todo) && !Selected(settings),
+                "点击「课表」：TimetableOpen=true，课表按钮选中");
+
+            Click(settings);
+            Check(vm.SettingsOpen && !vm.TimetableOpen && vm.SelectedNav?.Key == "myday"
+                  && Selected(settings) && !Selected(todo) && !Selected(timetable),
+                "点击「设置」：关闭课表并恢复原列表，设置按钮选中");
+
+            Back();
+            Check(!vm.SettingsOpen && vm.SelectedNav?.Key == "myday"
+                  && Selected(todo) && !Selected(settings) && !Selected(timetable),
+                "返回：关闭设置，待办按钮恢复选中");
+
+            Click(timetable);
+            Back();
+            Check(!vm.TimetableOpen && vm.SelectedNav?.Key == "myday"
+                  && Selected(todo) && !Selected(timetable),
+                "再进课表后返回：关闭课表，待办按钮恢复选中");
+
+            Click(todo);
+            Check(vm.SelectedNav?.Key == "all" && Selected(todo) && !Selected(timetable),
+                "点击「待办」：再次映射到 SelectedNav=all");
+
+            // 经过浅色 → 深色 → 浅色多次切换后，主题样式仍应只有一份。
+            var styles = Application.Current!.Styles;
+            var materialCount = styles.Count(
+                s => s.GetType().FullName == "Material.Styles.Themes.MaterialTheme");
+            var mobileCount = styles.OfType<StyleInclude>().Count(s => string.Equals(
+                s.Source?.ToString(), "avares://UniversityTodos/Styles/MobileTheme.axaml",
+                StringComparison.Ordinal));
+            Check(materialCount == 1 && mobileCount == 1,
+                $"主题多次切换后未叠加样式：MaterialTheme={materialCount}，MobileTheme={mobileCount}");
+        }
+        catch (Exception ex)
+        {
+            checks.Add($"FAIL · 自检异常：{ex.GetType().Name} {ex.Message}");
+            failures++;
+        }
+        finally
+        {
+            window.Close();
+            Pump(2);
+        }
+
+        if (failures > 0)
+            fatal.Add($"底部导航自检失败 {failures} 项（明细见报告「底部导航自检」）");
     }
 
     // ---------------- 外壳与逐屏渲染 ----------------
@@ -676,7 +848,8 @@ internal static class AndroidLayoutCheck
 
     // ---------------- 报告 ----------------
 
-    private static string BuildReport(IReadOnlyList<Sheet> sheets, IReadOnlyList<string> fatal)
+    private static string BuildReport(
+        IReadOnlyList<Sheet> sheets, IReadOnlyList<string> fatal, IReadOnlyList<string> navChecks)
     {
         var sb = new StringBuilder();
         sb.AppendLine("# Android 窄屏界面遮挡审计");
@@ -686,6 +859,8 @@ internal static class AndroidLayoutCheck
         sb.AppendLine();
         sb.AppendLine("窗口采用移动外壳（`MainView` + `MobileShellFactory` → `MobileShellView`），"
                       + "与 Android 头同一条路径；数据为内置样本（含长标题、多徽标、跨节次课块）。");
+        sb.AppendLine("本轮同时挂载了 Android 的 `MobileThemeHook`（MaterialTheme + MobileTheme），"
+                      + "截图与 Android 生产主题一致；另含一张深色列表截图。");
         sb.AppendLine();
 
         var total = sheets.Sum(s => s.Defects.Count);
@@ -701,6 +876,18 @@ internal static class AndroidLayoutCheck
             foreach (var f in fatal) sb.AppendLine($"- {f}");
             sb.AppendLine();
         }
+
+        sb.AppendLine("## 底部导航自检");
+        sb.AppendLine();
+        if (navChecks.Count == 0)
+        {
+            sb.AppendLine("（未运行）");
+        }
+        else
+        {
+            foreach (var check in navChecks) sb.AppendLine($"- {check}");
+        }
+        sb.AppendLine();
 
         // 同一类缺陷会在 4 个尺寸上各报一次，按「状态 + 控件」聚合，报告才读得下去。
         var grouped = sheets

@@ -50,6 +50,18 @@
                      LineHeight="21"
                      Foreground="{DynamicResource TodoTextPrimary}" />
         </StackPanel>
+
+        <!--
+          旧缓存缺 personId 时禁用并给出原因（见 OpenCourseToolTip），不拼错链接。
+          必须显式 ShowOnDisabled：ToolTipService 默认只给 IsEffectivelyEnabled 的控件出提示，
+          而这句提示恰恰只在按钮禁用时才需要（Avalonia 12 的 ShowOnDisabled 默认 false）。
+        -->
+        <Button Classes="primary" Content="在学习通中打开该课程"
+                HorizontalAlignment="Left"
+                IsEnabled="{Binding CanOpenCourse}"
+                ToolTip.Tip="{Binding OpenCourseToolTip}"
+                ToolTip.ShowOnDisabled="True"
+                Click="OnOpenChaoxingCourseClick" />
       </StackPanel>
     </ScrollViewer>
 

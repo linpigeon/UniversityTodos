@@ -18,6 +18,16 @@ namespace UniversityTodos.Views;
 /// </summary>
 public partial class TimetableView : UserControl
 {
+    /// <summary>移动紧凑模式：七列同屏、更小的刻度列与课块；桌面默认 false。</summary>
+    public static readonly StyledProperty<bool> CompactModeProperty =
+        AvaloniaProperty.Register<TimetableView, bool>(nameof(CompactMode));
+
+    public bool CompactMode
+    {
+        get => GetValue(CompactModeProperty);
+        set => SetValue(CompactModeProperty, value);
+    }
+
     public TimetableView()
     {
         InitializeComponent();
@@ -31,16 +41,21 @@ public partial class TimetableView : UserControl
         };
 
         // 课块是绝对定位的，画布宽度必须先知道 → 宽度变化时告诉 ViewModel 重算。
-        // 用课块滚动区的**可视区宽度**（= 控件宽度 - 节次刻度列）而不是整个容器宽度：
-        // 那才是真正留给 7 天的宽度，也才与 DaysWidth 的口径一致。
-        GridScroll.SizeChanged += (_, _) => SetGridWidth(GridScroll.Viewport.Width);
+        // GridWidth 是**总宽**（含节次刻度列）：这里把 viewport 加回当前有效刻度列宽，
+        // ViewModel 再只扣一次，避免以前 viewport 被重复扣掉 68/38。
+        GridScroll.SizeChanged += (_, _) => SetGridWidthFromViewport();
+
+        // DataContext 可能晚于 CompactMode 到达：两者任一变化都要把紧凑模式同步给 VM。
+        DataContextChanged += (_, _) => ApplyCompactMode();
+        ApplyCompactMode();
 
         // 空状态提示与详情面板的边界都按实测值写（原因见 ApplyEmptyStateBounds），
         // 并加一条设备日志：这类几何在真机上出错时，只有实测量能定位。
         LayoutUpdated += (_, _) =>
         {
             ApplyEmptyStateBounds();
-            ApplyDetailCardWidth();
+            if (Vm?.Timetable.HasSelection == true) ApplyDetailCardWidth();
+            else _detailCard = null;
         };
 
         // **绝对定位必须在这里显式设置**：Canvas.Left/Top 是附加属性，
@@ -71,9 +86,26 @@ public partial class TimetableView : UserControl
 
         // 点空白处收起详情：详情面板本身与网格同级，所以在整个控件上监听。
         AddHandler(PointerPressedEvent, OnSurfacePressed, RoutingStrategies.Tunnel);
+        AddHandler(PointerPressedEvent, OnWeekSwipePressed, RoutingStrategies.Tunnel);
+        AddHandler(PointerReleasedEvent, OnWeekSwipeReleased, RoutingStrategies.Tunnel);
+    }
+
+    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
+    {
+        base.OnPropertyChanged(change);
+        if (change.Property == CompactModeProperty) ApplyCompactMode();
+    }
+
+    private void ApplyCompactMode()
+    {
+        if (Vm is not { } vm) return;
+        vm.Timetable.CompactMode = CompactMode;
+        SetGridWidthFromViewport();
     }
 
     private MainViewModel? Vm => DataContext as MainViewModel;
+    private bool _trackingWeekSwipe;
+    private Avalonia.Point _weekSwipeStart;
 
     /// <summary>
     /// 空状态提示的左右边界：**用实测 Bounds 直接写**，不用绑定。
@@ -162,6 +194,19 @@ public partial class TimetableView : UserControl
 
     /// <summary>避免两个 ScrollViewer 互相触发导致抖动。</summary>
     private bool _syncing;
+
+    /// <summary>
+    /// GridWidth 的语义是**总宽**：课块可视区 + 当前有效节次列宽。
+    /// ViewModel 只扣一次 VisiblePeriodColumnWidth，避免重复扣减。
+    /// </summary>
+    private void SetGridWidthFromViewport()
+    {
+        if (Vm is not { } vm) return;
+        var viewport = GridScroll.Viewport.Width;
+        if (viewport <= 0) return;
+
+        SetGridWidth(viewport + vm.Timetable.VisiblePeriodColumnWidth);
+    }
 
     private void SetGridWidth(double width)
     {
@@ -256,6 +301,30 @@ public partial class TimetableView : UserControl
     private void OnCloseDetailClick(object? sender, RoutedEventArgs e)
     {
         if (Vm is { } vm) vm.Timetable.SelectedBlock = null;
+    }
+
+    private void OnWeekSwipePressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!CompactMode || !e.Pointer.IsPrimary) return;
+        if (e.Source is Visual visual && visual.FindAncestorOfType<Button>(true) is not null) return;
+
+        _trackingWeekSwipe = true;
+        _weekSwipeStart = e.GetCurrentPoint(this).Position;
+    }
+
+    private void OnWeekSwipeReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!_trackingWeekSwipe || !e.Pointer.IsPrimary) return;
+        _trackingWeekSwipe = false;
+
+        var end = e.GetCurrentPoint(this).Position;
+        var dx = end.X - _weekSwipeStart.X;
+        var dy = Math.Abs(end.Y - _weekSwipeStart.Y);
+        if (Math.Abs(dx) < 60 || dy > 40) return;
+
+        SwipeTransition.Play(TimetableGrid, dx < 0 ? 48 : -48);
+        Vm?.ShiftTimetableWeek(dx < 0 ? 1 : -1);
+        e.Handled = true;
     }
 
     private void OnPrevWeekClick(object? sender, RoutedEventArgs e) => Vm?.ShiftTimetableWeek(-1);

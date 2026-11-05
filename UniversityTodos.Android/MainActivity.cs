@@ -1,5 +1,7 @@
+using System;
 using Android.App;
 using Android.Content.PM;
+using Android.OS;
 using Avalonia.Android;
 
 namespace UniversityTodos.Android;
@@ -28,4 +30,29 @@ namespace UniversityTodos.Android;
     ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.UiMode)]
 public class MainActivity : AvaloniaMainActivity
 {
+    protected override void OnCreate(Bundle? savedInstanceState)
+    {
+        base.OnCreate(savedInstanceState);
+
+        // Android 13+ 首次运行请求通知权限；已授予时系统不会重复弹框。
+        if (OperatingSystem.IsAndroidVersionAtLeast(33)
+            && CheckSelfPermission(global::Android.Manifest.Permission.PostNotifications) != Permission.Granted)
+        {
+            RequestPermissions([global::Android.Manifest.Permission.PostNotifications], 1001);
+        }
+
+#if DEBUG
+        // 设备通知链路自检：adb 启动时附带 --ez notification_probe true 才会发送。
+        // 仅存在于 Debug 构建，正式包没有这个测试入口。
+        if (Intent?.GetBooleanExtra("notification_probe", false) == true)
+        {
+            var error = global::UniversityTodos.ViewModels.MainViewModel.Notifier.Show(
+                new global::UniversityTodos.Services.AppNotification(
+                    "大学事项综合待办",
+                    "系统通知链路测试",
+                    "点击应回到应用"));
+            System.Console.WriteLine(error is null ? "NOTIFICATION_PROBE OK" : $"NOTIFICATION_PROBE {error}");
+        }
+#endif
+    }
 }

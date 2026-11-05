@@ -99,7 +99,8 @@ public sealed class ManualTodoStore : IManualTodoStore
             if (!seen.Add(item.Id)) continue;
 
             item.Tags = NormalizeTags(item.Tags);
-            if (!Enum.IsDefined(item.Priority)) item.Priority = TodoPriority.Normal;
+            if (item.Priority is not (TodoPriority.Low or TodoPriority.Normal or TodoPriority.High))
+                item.Priority = TodoPriority.Normal;
             result.Add(item);
         }
         return result;

@@ -101,4 +101,13 @@ public partial class TodoDetailView : UserControl
         var item = (sender as Control)?.DataContext as TodoItemViewModel ?? vm.SelectedItem;
         if (item is not null) vm.OpenSource(item);
     }
+
+    private void OnOpenChaoxingCourseClick(object? sender, RoutedEventArgs e)
+    {
+        if (Vm is not { } vm) return;
+
+        var course = (sender as Control)?.DataContext as ChaoxingCourseViewModel
+                     ?? vm.List.SelectedCourse;
+        if (course is not null) vm.OpenChaoxingCourse(course);
+    }
 }

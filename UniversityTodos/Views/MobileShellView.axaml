@@ -10,8 +10,11 @@
              x:DataType="vm:MainViewModel">
 
   <!--
-    Android 外壳：抽屉式移动布局。
-    列表全屏；☰ 展开覆盖式抽屉（遮罩 + 不透明面板）；点选事项进全屏详情二级页。
+    Android 外壳：移动布局 = 内容区 + 三项底部导航（待办 / 课表 / 设置）。
+    列表、课表与设置占第 0 行；底部导航占第 1 行并持续可见（抽屉打开时除外）。
+    详情 / 答题 / 登录 / 教务导入等整页覆盖层以及抽屉仍用 Grid.RowSpan=2 盖住底栏；
+    课表和设置不再盖住底栏，只占用内容区。
+    抽屉仍是覆盖式（遮罩 + 不透明面板）；点选事项进全屏详情二级页。
     与桌面外壳（TodoShellView）共用同一 MainViewModel 与全部内容部件
     （SidebarView / TodoListView / TodoDetailView），只在外壳组合方式上不同。
 
@@ -23,23 +26,79 @@
     已抽成 IPlatformServices.PrepareExamWebSession（默认空实现）。
     现在两端编译的是同一份外壳代码，审计的就是线上跑的那个。
   -->
-  <Grid>
+  <Grid RowDefinitions="*,Auto">
+
+    <!-- 列表底下的不透明层：TodoListView 的 ListBrush 带 alpha（壁纸透明度），
+         没有这层时 Android 壁纸会透上来，正文对比度不足。 -->
+    <Border Grid.Row="0" Background="{DynamicResource TodoDialogBackground}" />
+
     <!-- 全屏待办列表（DrawerMode=true：头部按钮切抽屉） -->
-    <views:TodoListView DrawerMode="True" />
+    <views:TodoListView Name="MobileTodoList" Grid.Row="0" DrawerMode="True"
+                        IsVisible="{Binding ShowTodoPane}" />
+
+    <!-- 底部导航：三项等宽（待办 / 课表 / 设置），复用 MainViewModel 的
+         NavItems / SelectedNav / OpenSettings，不新增业务导航状态。
+         “待办”统一映射到 key=all，“课表/设置”保持原覆盖层逻辑；
+         选中态由 MobileShellView.axaml.cs 同步。抽屉打开时整条收起。 -->
+    <Border Grid.Row="1" Name="MobileNavBar" Classes="mobile-nav"
+            IsVisible="{Binding !DrawerOpen}">
+      <Grid ColumnDefinitions="*,*,*">
+
+        <Button Grid.Column="0" Name="TodoNavButton" Classes="mobile-nav"
+                Classes.selected="True" Tag="todo" Click="OnMobileNavClick">
+          <StackPanel Spacing="2" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Border Classes="mobile-nav-pill">
+              <TextBlock Classes="icon" Text="&#xF03A;" />
+            </Border>
+            <TextBlock Text="待办" />
+          </StackPanel>
+        </Button>
+
+        <Button Grid.Column="1" Name="TimetableNavButton" Classes="mobile-nav"
+                Tag="timetable" Click="OnMobileNavClick">
+          <StackPanel Spacing="2" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Border Classes="mobile-nav-pill">
+              <TextBlock Classes="icon" Text="&#xF133;" />
+            </Border>
+            <TextBlock Text="课表" />
+          </StackPanel>
+        </Button>
+
+        <Button Grid.Column="2" Name="SettingsNavButton" Classes="mobile-nav"
+                Tag="settings" Click="OnMobileNavClick">
+          <StackPanel Spacing="2" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Border Classes="mobile-nav-pill">
+              <TextBlock Classes="icon" Text="&#xF013;" />
+            </Border>
+            <TextBlock Text="设置" />
+          </StackPanel>
+        </Button>
+
+      </Grid>
+    </Border>
 
     <!--
-      课表页：全屏覆盖（与设置页同款）。
-      课表是整页覆盖而不是列表筛选——7 天 × 节次的网格需要宽度，挤在列表栏里读不清；
-      手机上靠横向滑动看周末那两列。
-      自带表头（含返回/导入按钮），所以这里不再叠一层返回栏。
-      **不加这一段，Android 端点侧栏「课表」会什么都没发生**——抽屉里能点，
-      但移动外壳从来没把 TimetableView 放进可视树（实测踩到）。
+      课表页：只占内容区第 0 行，底部导航保持可见。
+      移动端 CompactMode 已是七列同屏，不再需要横向滑动看周末；
+      桌面端仍走 TimetableView 的默认宽度与布局。
+      自带移动头部（返回/导入/周次），所以这里不再叠一层返回栏。
+      宿主只在首次打开时创建 TimetableView，关闭后保留实例复用；
+      启动时不为不可见课表创建控件、执行文字排版。
     -->
-    <views:TimetableView IsVisible="{Binding TimetableOpen}" />
+    <ContentControl Name="TimetableContentHost" Grid.Row="0"
+                    IsVisible="{Binding TimetableOpen}" />
+
+    <!-- 教务导入页：覆盖课表与底部导航。控制面板用不透明底；
+         真正的教务网页由 JwImportView 在独立 NativeWebDialog 中打开。 -->
+    <Border Grid.RowSpan="2" Background="{DynamicResource TodoDialogBackground}"
+            IsVisible="{Binding JwImportOpen}">
+      <views:JwImportView />
+    </Border>
 
     <!-- 详情二级页：选中事项后全屏覆盖，左上角返回。
          背景必须不透明：SurfaceBrush 为壁纸效果带透明度，浮层会透出列表。 -->
-    <Border Background="{DynamicResource TodoDialogBackground}"
+    <Border Grid.RowSpan="2"
+            Background="{DynamicResource TodoDialogBackground}"
             IsVisible="{Binding SelectedItem, Converter={x:Static ObjectConverters.IsNotNull}}">
       <Grid RowDefinitions="Auto,*">
         <Button Grid.Row="0" Classes="tool" Click="OnDetailBackClick"
@@ -55,8 +114,9 @@
       </Grid>
     </Border>
 
-    <!-- 设置页：全屏覆盖（在详情页之上、抽屉遮罩之下），左上角返回 -->
-    <Border Background="{DynamicResource TodoDialogBackground}"
+    <!-- 设置页占内容区，底部导航保持可见；左上角仍可返回列表。 -->
+    <Border Grid.Row="0"
+            Background="{DynamicResource TodoDialogBackground}"
             IsVisible="{Binding SettingsOpen}">
       <Grid RowDefinitions="Auto,*">
         <Button Grid.Row="0" Classes="tool" Click="OnSettingsBackClick"
@@ -68,12 +128,13 @@
                        Foreground="{DynamicResource TodoTextSecondary}" />
           </StackPanel>
         </Button>
-        <views:SettingsView Grid.Row="1" />
+        <views:SettingsView Grid.Row="1" CompactMode="True" />
       </Grid>
     </Border>
 
     <!-- 应用内答题页（移动版考试 H5，WebView 全局 cookie 自带登录态），左上角返回 -->
-    <Border Background="{DynamicResource TodoDialogBackground}"
+    <Border Grid.RowSpan="2"
+            Background="{DynamicResource TodoDialogBackground}"
             IsVisible="{Binding ExamWebUrl, Converter={x:Static ObjectConverters.IsNotNull}}">
       <Grid RowDefinitions="Auto,*">
         <Button Grid.Row="0" Classes="tool" Click="OnExamWebBackClick"
@@ -85,12 +146,13 @@
                        Foreground="{DynamicResource TodoTextSecondary}" />
           </StackPanel>
         </Button>
-        <controls:NativeWebView Name="ExamWebView" Grid.Row="1" />
+        <Panel Name="ExamWebHost" Grid.Row="1" />
       </Grid>
     </Border>
 
     <!-- 登录覆盖层（雨课堂 / 学习通，从设置页「账号」进入；启动不再弹登录） -->
-    <Border Background="{DynamicResource TodoDialogBackground}"
+    <Border Grid.RowSpan="2"
+            Background="{DynamicResource TodoDialogBackground}"
             IsVisible="{Binding LoginPageOpen, Converter={x:Static ObjectConverters.IsNotNull}}">
       <Grid RowDefinitions="Auto,*">
         <Button Grid.Row="0" Classes="tool" Click="OnLoginBackClick"
@@ -102,25 +164,25 @@
                        Foreground="{DynamicResource TodoTextSecondary}" />
           </StackPanel>
         </Button>
-        <Panel Grid.Row="1">
-          <views:LoginView IsVisible="{Binding YktLoginOpen}" />
-          <views:ChaoxingLoginView IsVisible="{Binding ChaoxingLoginOpen}" />
-          <views:PigaiLoginView IsVisible="{Binding PigaiLoginOpen}" />
-        </Panel>
+        <ContentControl Name="LoginContentHost" Grid.Row="1" />
       </Grid>
     </Border>
 
     <!-- 抽屉遮罩（点遮罩收起） -->
-    <Border Background="#66000000"
+    <Border Grid.RowSpan="2" Background="#66000000"
             IsVisible="{Binding DrawerOpen}"
             PointerPressed="OnDrawerScrimPressed" />
 
     <!-- 覆盖式抽屉（不透明底，侧边栏画刷带透明度，叠底后不透出列表） -->
-    <Border IsVisible="{Binding DrawerOpen}"
+    <Border Name="DrawerPanel" Grid.RowSpan="2" IsVisible="{Binding DrawerOpen}"
             HorizontalAlignment="Left" Width="300"
             Background="{DynamicResource TodoDialogBackground}"
             BoxShadow="4 0 24 0 #40000000">
       <views:SidebarView />
     </Border>
+
+    <!-- Android 新建待办：与桌面窗口共享 TodoEditorForm，全屏显示并盖住底栏。 -->
+    <Border Name="ManualEditorOverlay" Grid.RowSpan="2" IsVisible="False"
+            Background="{DynamicResource TodoDialogBackground}" />
   </Grid>
 </UserControl>

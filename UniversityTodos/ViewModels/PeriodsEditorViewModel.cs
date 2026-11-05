@@ -36,6 +36,9 @@ public sealed partial class PeriodRowViewModel : ViewModelBase
     [ObservableProperty]
     private string _endTime;
 
+    [ObservableProperty]
+    private bool _compactMode;
+
     /// <summary>这一节是否停用（起止都是 00:00）。</summary>
     public bool IsDisabled =>
         StartTime.Trim() == Timetable.DisabledPeriodTime && EndTime.Trim() == Timetable.DisabledPeriodTime;
@@ -77,6 +80,14 @@ public sealed partial class PeriodsEditorViewModel : ViewModelBase
     /// <summary>可编辑的节次行。</summary>
     public ObservableCollection<PeriodRowViewModel> Rows { get; } = [];
 
+    [ObservableProperty]
+    private bool _compactMode;
+
+    partial void OnCompactModeChanged(bool value)
+    {
+        foreach (var row in Rows) row.CompactMode = value;
+    }
+
     /// <summary>编辑区的状态/错误提示（校验失败时显示具体原因）。</summary>
     [ObservableProperty]
     private string _status = string.Empty;
@@ -106,7 +117,10 @@ public sealed partial class PeriodsEditorViewModel : ViewModelBase
         var source = periods.Count > 0 ? periods : Timetable.DefaultPeriods;
         foreach (var slot in source)
         {
-            var row = new PeriodRowViewModel(slot.Period, slot.StartTime, slot.EndTime);
+            var row = new PeriodRowViewModel(slot.Period, slot.StartTime, slot.EndTime)
+            {
+                CompactMode = CompactMode,
+            };
             // 逐行订阅：用户直接在输入框里改时间也要算「有改动」，
             // 否则「未保存」提示永远不会亮，切走时也无从提醒。
             row.PropertyChanged += OnRowChanged;
@@ -137,7 +151,10 @@ public sealed partial class PeriodsEditorViewModel : ViewModelBase
         }
 
         var (start, end) = SuggestNextTime();
-        var row = new PeriodRowViewModel(Rows.Count + 1, start, end);
+        var row = new PeriodRowViewModel(Rows.Count + 1, start, end)
+        {
+            CompactMode = CompactMode,
+        };
         row.PropertyChanged += OnRowChanged;
         Rows.Add(row);
         Renumber();

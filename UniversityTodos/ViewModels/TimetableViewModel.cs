@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using UniversityTodos.Models;
@@ -22,6 +21,7 @@ public sealed partial class TimetableBlockViewModel : ViewModelBase
     {
         Model = item;
         Rect = rect;
+        CompactMode = owner.CompactMode;
         Fill = CourseColor.For(item.Name, owner.IsDarkTheme).Fill;
         Line = CourseColor.For(item.Name, owner.IsDarkTheme).Line;
         TextColor = CourseColor.For(item.Name, owner.IsDarkTheme).Text;
@@ -32,6 +32,9 @@ public sealed partial class TimetableBlockViewModel : ViewModelBase
     }
 
     public ScheduleItem Model { get; }
+
+    /// <summary>创建时的移动紧凑模式（课块在窄卡片里允许更早显示地点）。</summary>
+    public bool CompactMode { get; }
 
     /// <summary>画布上的矩形（绝对定位）。</summary>
     public TimetableLayout.BlockRect Rect { get; }
@@ -56,6 +59,8 @@ public sealed partial class TimetableBlockViewModel : ViewModelBase
     public string TextColor { get; }
 
     public string? Teacher => Model.Teacher;
+
+    public bool ShowTeacher => CompactMode && !string.IsNullOrWhiteSpace(Teacher);
 
     public string? Location => Model.Location;
 
@@ -112,11 +117,13 @@ public sealed partial class TimetableBlockViewModel : ViewModelBase
     /// <summary>
     /// 课块宽度是否够显示地点。
     /// <para>
-    /// 同格多门课分栏后每栏可能只有 78px，地点会被截成「博文…」这种没信息量的碎片，
+    /// 桌面同格多门课分栏后每栏可能只有 78px，地点会被截成「博文…」这种没信息量的碎片，
     /// 不如不显示——完整信息在 hover 提示与点击后的详情面板里都有。
+    /// 移动紧凑模式一天只有约 34–40px，仍保留地点并允许完整换行，
+    /// 否则长教室名会在窄卡片上被截掉。
     /// </para>
     /// </summary>
-    public bool CanShowLocation => Width >= 104;
+    public bool CanShowLocation => Width >= (CompactMode ? 24 : 104);
 
     /// <summary>提示：课程、时间、周次、教师地点，供 hover 显示完整信息。</summary>
     public string Tooltip
@@ -147,6 +154,11 @@ public sealed partial class TimetableDayHeaderViewModel : ViewModelBase
     /// <summary>「周一」这类星期文案。</summary>
     public string DayName { get; }
 
+    /// <summary>移动紧凑表头使用「一」这类单字星期。</summary>
+    public string ShortDayName => DayName.StartsWith("周", StringComparison.Ordinal)
+        ? DayName[1..]
+        : DayName;
+
     /// <summary>日期文案（未配置学期基准时为空）。</summary>
     public string DateText { get; }
 
@@ -157,7 +169,7 @@ public sealed partial class TimetableDayHeaderViewModel : ViewModelBase
 }
 
 /// <summary>课表左侧的节次刻度（第 N 节 + 时间）。</summary>
-public sealed class TimetablePeriodViewModel(int period, string timeText, double top, double height)
+public sealed class TimetablePeriodViewModel(int period, string timeText, double top, double height, bool compactMode = false)
 {
     public int Period { get; } = period;
 
@@ -167,7 +179,23 @@ public sealed class TimetablePeriodViewModel(int period, string timeText, double
     /// <summary>该节起止时间（停用节次为空）。</summary>
     public string TimeText { get; } = timeText;
 
+    /// <summary>该节的开始时间（紧凑刻度只显示开始时间）。</summary>
+    public string StartTimeText { get; } = timeText.Length == 0
+        ? string.Empty
+        : timeText.Split('-')[0].Trim();
+
+    /// <summary>该节的结束时间；移动刻度与开始时间分行显示。</summary>
+    public string EndTimeText { get; } = timeText.Contains('-')
+        ? timeText.Split('-', 2)[1].Trim()
+        : string.Empty;
+
     public bool HasTime => TimeText.Length > 0;
+
+    /// <summary>桌面刻度：节次 + 完整起止时间。</summary>
+    public bool ShowFullTime => !compactMode;
+
+    /// <summary>移动紧凑刻度：节次、开始时间、结束时间分行显示。</summary>
+    public bool ShowCompactTime => compactMode;
 
     /// <summary>在网格画布上的顶部位置。</summary>
     public double Top { get; } = top;
@@ -198,6 +226,32 @@ public sealed partial class TimetableViewModels : ViewModelBase
     /// </summary>
     public const double PeriodColumnWidth = 68;
 
+    /// <summary>移动紧凑模式的节次刻度列宽；桌面仍用 <see cref="PeriodColumnWidth"/>。</summary>
+    public const double CompactPeriodColumnWidth = 38;
+
+    /// <summary>移动紧凑模式的最小天宽（≈36，取 34 以保证 320dp 七列同屏不横滚）。</summary>
+    public const double CompactMinDayWidth = 34;
+
+    /// <summary>移动紧凑模式分栏后的最小栏宽。</summary>
+    public const double CompactMinColumnWidth = 18;
+
+    /// <summary>
+    /// 当前实际使用的节次刻度列宽。视图宽度、网格可用宽度都按它计算；
+    /// 桌面是 68，移动紧凑是 38。
+    /// </summary>
+    public double VisiblePeriodColumnWidth =>
+        CompactMode ? CompactPeriodColumnWidth : PeriodColumnWidth;
+
+    /// <summary>移动紧凑模式：七列同屏、更小的刻度列与课块。</summary>
+    [ObservableProperty]
+    private bool _compactMode;
+
+    partial void OnCompactModeChanged(bool value)
+    {
+        OnPropertyChanged(nameof(VisiblePeriodColumnWidth));
+        RebuildRequested?.Invoke();
+    }
+
     /// <summary>网格最小高度：避免课少时画布塌成一条。</summary>
     private const double MinGridHeight = 520;
 
@@ -222,7 +276,11 @@ public sealed partial class TimetableViewModels : ViewModelBase
     /// （实测踩过：重写时把这一条弄丢了，WeekNumber 从 7 一路加到 11，WeekLabel 还停在「第 7 周」）。
     /// </para>
     /// </summary>
-    partial void OnWeekNumberChanged(int value) => RebuildRequested?.Invoke();
+    partial void OnWeekNumberChanged(int value)
+    {
+        OnPropertyChanged(nameof(WeekNavText));
+        RebuildRequested?.Invoke();
+    }
 
     /// <summary>是否配置了学期第一周（决定是否显示日期）。</summary>
     [ObservableProperty]
@@ -232,6 +290,9 @@ public sealed partial class TimetableViewModels : ViewModelBase
     [ObservableProperty]
     private string _weekLabel = string.Empty;
 
+    /// <summary>移动紧凑头部的周次按钮文案。</summary>
+    public string WeekNavText => $"第 {WeekNumber} 周";
+
     /// <summary>当前显示的周次是不是「今天所在的周」（决定是否高亮今天）。</summary>
     [ObservableProperty]
     private bool _isCurrentWeekDisplayed = true;
@@ -239,6 +300,11 @@ public sealed partial class TimetableViewModels : ViewModelBase
     /// <summary>本周课程数（表头副标题用）。</summary>
     [ObservableProperty]
     private int _blockCount;
+
+    partial void OnBlockCountChanged(int value) => OnPropertyChanged(nameof(BlockCountText));
+
+    /// <summary>移动紧凑头部的课程数文案。</summary>
+    public string BlockCountText => $"{BlockCount} 节";
 
     /// <summary>「下一节课」提示（如「下一节：高等数学 · 10:00 明德楼B107」）。</summary>
     [ObservableProperty]
@@ -273,14 +339,14 @@ public sealed partial class TimetableViewModels : ViewModelBase
     /// <summary>当前主题是否深色（决定课程配色取哪一套）。</summary>
     public bool IsDarkTheme { get; private set; }
 
-    /// <summary>课块（绝对定位，按画布摆放）。</summary>
-    public ObservableCollection<TimetableBlockViewModel> Blocks { get; } = [];
+    /// <summary>课块（绝对定位，按画布摆放）。重建完成后一次性替换，避免逐条触发集合通知。</summary>
+    public IReadOnlyList<TimetableBlockViewModel> Blocks { get; private set; } = [];
 
     /// <summary>节次刻度（左侧一列）。</summary>
-    public ObservableCollection<TimetablePeriodViewModel> Periods { get; } = [];
+    public IReadOnlyList<TimetablePeriodViewModel> Periods { get; private set; } = [];
 
     /// <summary>星期列表头。</summary>
-    public ObservableCollection<TimetableDayHeaderViewModel> DayHeaders { get; } = [];
+    public IReadOnlyList<TimetableDayHeaderViewModel> DayHeaders { get; private set; } = [];
 
     /// <summary>网格内容高度（视图据此设置画布高度）。</summary>
     [ObservableProperty]
@@ -365,11 +431,11 @@ public sealed partial class TimetableViewModels : ViewModelBase
         // 于是窗口一有尺寸变化（首次布局就会有一次）详情面板就自己消失了。
         var selectedKey = SelectedBlock is { } previous ? BlockKey(previous) : null;
 
-        Blocks.Clear();
-        Periods.Clear();
-        DayHeaders.Clear();
+        var nextBlocks = new List<TimetableBlockViewModel>();
+        var nextPeriods = new List<TimetablePeriodViewModel>();
+        var nextDayHeaders = new List<TimetableDayHeaderViewModel>();
 
-        BuildDayHeaders(weekStart, termStartDate);
+        BuildDayHeaders(nextDayHeaders, weekStart, termStartDate);
 
         // 收集可画课块（剔除落在停用节次上的）。
         var drawable = new List<(ScheduleItem Item, int Start, int End)>();
@@ -394,8 +460,9 @@ public sealed partial class TimetableViewModels : ViewModelBase
             var timeText = slot is null || Services.Timetable.IsPeriodDisabled(slot)
                 ? string.Empty
                 : $"{slot.StartTime}-{slot.EndTime}";
-            Periods.Add(new TimetablePeriodViewModel(
-                period, timeText, TimetableLayout.RowTop(period), TimetableLayout.PeriodRowHeight));
+            nextPeriods.Add(new TimetablePeriodViewModel(
+                period, timeText, TimetableLayout.RowTop(period), TimetableLayout.PeriodRowHeight,
+                CompactMode));
         }
 
         // 同一天 + 节次区间相交的课块分栏（同格多门课不再互相压住）。
@@ -414,7 +481,9 @@ public sealed partial class TimetableViewModels : ViewModelBase
 
         var maxColumns = perDayColumns.Count == 0 ? 1 : perDayColumns.Max(d => d.Columns);
         _daysWidth = TimetableLayout.RequiredDaysWidth(
-            Math.Max(0, GridWidth - PeriodColumnWidth), dayCount, maxColumns);
+            Math.Max(0, GridWidth - VisiblePeriodColumnWidth), dayCount, maxColumns,
+            CompactMode ? CompactMinDayWidth : TimetableLayout.MinDayWidth,
+            CompactMode ? CompactMinColumnWidth : TimetableLayout.MinColumnWidth);
         OnPropertyChanged(nameof(DaysWidth));
 
         var spanIndex = 0;
@@ -430,9 +499,17 @@ public sealed partial class TimetableViewModels : ViewModelBase
                 var (column, columnCount) = columns[i];
                 var rect = TimetableLayout.Measure(
                     item.Weekday, start, end, DaysWidth, column, columnCount, dayCount);
-                Blocks.Add(new TimetableBlockViewModel(item, this, rect));
+                nextBlocks.Add(new TimetableBlockViewModel(item, this, rect));
             }
         }
+
+        // 所有计算完成后再一次性通知视图，避免 Clear/Add 触发多轮中间布局。
+        Blocks = nextBlocks;
+        Periods = nextPeriods;
+        DayHeaders = nextDayHeaders;
+        OnPropertyChanged(nameof(Blocks));
+        OnPropertyChanged(nameof(Periods));
+        OnPropertyChanged(nameof(DayHeaders));
 
         // 本周真实要上的课数（不含淡化显示的其它周次课）。
         BlockCount = Blocks.Count(b => b.IsCurrentWeek);
@@ -456,7 +533,8 @@ public sealed partial class TimetableViewModels : ViewModelBase
         $"{block.Model.Id}|{block.Model.Weekday}|{block.Model.StartPeriod}";
 
     /// <summary>重建列表头（星期 + 日期 + 今天）。</summary>
-    private void BuildDayHeaders(DateOnly? weekStart, string? termStartDate)
+    private void BuildDayHeaders(
+        IList<TimetableDayHeaderViewModel> target, DateOnly? weekStart, string? termStartDate)
     {
         var today = Services.Timetable.ParseDate(TodayDate);
         var count = ShowWeekend ? 7 : 5;
@@ -474,7 +552,7 @@ public sealed partial class TimetableViewModels : ViewModelBase
                 isToday = IsCurrentWeekDisplayed && today is { } t && t == date;
             }
 
-            DayHeaders.Add(new TimetableDayHeaderViewModel(i + 1, label, dateText, isToday));
+            target.Add(new TimetableDayHeaderViewModel(i + 1, label, dateText, isToday));
         }
 
         _ = termStartDate;

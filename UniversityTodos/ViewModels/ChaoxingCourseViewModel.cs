@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using UniversityTodos.Models;
+using UniversityTodos.Services;
 
 namespace UniversityTodos.ViewModels;
 
@@ -72,4 +73,17 @@ public sealed partial class ChaoxingCourseViewModel(ChaoxingCourse model) : View
 
     /// <summary>详情栏小标题文案。</summary>
     public string LeavesHeader => LeafCount == 0 ? "任务点" : $"未完成任务点（{LeafCount} 处）";
+
+    /// <summary>该课程的课程页地址；旧缓存缺 personId 时为 null。</summary>
+    public string? CourseUrl => ChaoxingUrls.CoursePage(Model.CourseId, Model.ClazzId, Model.PersonId);
+
+    /// <summary>是否具备直达课程页的完整参数。</summary>
+    public bool CanOpenCourse => CourseUrl is not null;
+
+    /// <summary>直达按钮的提示：参数不全时说明原因，而不是给一个点了没反应的按钮。</summary>
+    public string OpenCourseToolTip => CanOpenCourse
+        ? "打开该课程的学习通首页"
+        : "旧缓存缺少课程参数，请先同步一次学习通课程。";
+
+    public void RefreshModelBindings() => OnPropertyChanged(string.Empty);
 }

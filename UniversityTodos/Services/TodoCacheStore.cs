@@ -100,6 +100,8 @@ public sealed class TodoCacheStore : ITodoCacheStore
             cache.Chaoxing = Validate(cache.Chaoxing, TodoKind.Homework, cache.SyncedAt);
             cache.Pigai = Validate(cache.Pigai, TodoKind.Homework);
             cache.Announcements = Validate(cache.Announcements, TodoKind.Announcement);
+            foreach (var announcement in cache.Announcements)
+                RestoreAnnouncementSourceUrl(announcement);
             cache.ChaoxingCourses = ValidateCourses(cache.ChaoxingCourses);
             return cache;
         }
@@ -187,18 +189,43 @@ public sealed class TodoCacheStore : ITodoCacheStore
         => t is null || (t >= MinPlausible && t <= MaxPlausible);
 
     /// <summary>
+    /// 恢复/校验公告详情链接。
+    /// <para>
+    /// 新缓存带有 <see cref="TodoItem.NoticeId"/>（同步时由学习日志 type=9 的
+    /// <c>courseware_id</c> 解析），冷启动时据此重建详情深链，不依赖链接字符串。
+    /// 旧缓存没有该字段，无法离线推导正确 noticeId；其中来自上一版错误实现的
+    /// <c>noticeView</c> 链接一律作废（置空后由 OpenSource 回落课程页），
+    /// 等下一次成功同步写入 NoticeId。旧 CourseLog/空链接不猜详情，保持原样。
+    /// </para>
+    /// </summary>
+    private static void RestoreAnnouncementSourceUrl(TodoItem item)
+    {
+        if (item.NoticeId is { } noticeId && noticeId > 0 && item.ClassroomId > 0)
+        {
+            item.SourceUrl = YktUrls.Notice(item.ClassroomId, noticeId);
+            return;
+        }
+
+        if (item.SourceUrl is { } url
+            && url.Contains("/v2/web/noticeView/", StringComparison.Ordinal))
+            item.SourceUrl = null;
+    }
+
+    /// <summary>
     /// 课程汇总的合法性校验：丢弃没有课程名或 id 不成立的条目。
     /// 任务点数按「不明则为 0」处理，不因为一个数字离谱就丢掉整门课。
+    /// 旧缓存没有 <see cref="ChaoxingCourse.PersonId"/>（为 0）也保留课程：
+    /// 课程仍可展示，只是直达课程页的按钮不可用，等下次同步补上。
     /// </summary>
     private static List<ChaoxingCourse> ValidateCourses(List<ChaoxingCourse> courses)
     {
-        var seen = new HashSet<long>();
+        var seen = new HashSet<(long CourseId, long ClazzId)>();
         var valid = new List<ChaoxingCourse>(courses.Count);
         foreach (var c in courses)
         {
             if (string.IsNullOrWhiteSpace(c.CourseName)) continue;
             if (c.CourseId <= 0 || c.ClazzId <= 0) continue;
-            if (!seen.Add(c.CourseId)) continue;
+            if (!seen.Add((c.CourseId, c.ClazzId))) continue;
             if (c.PendingTaskPoints < 0) c.PendingTaskPoints = 0;
             // 明细里丢掉明显无效的行（没有名字、计数非正）。
             c.Leaves = c.Leaves

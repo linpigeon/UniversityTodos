@@ -48,7 +48,7 @@ public enum TodoSource
     Class,
 }
 
-/// <summary>自建事项的优先级（平台事项统一按 Normal 处理）。</summary>
+/// <summary>事项优先级。自建事项使用低 / 普通 / 高；紧急仅用于平台作业的自动优先级。</summary>
 public enum TodoPriority
 {
     /// <summary>低。</summary>
@@ -59,6 +59,9 @@ public enum TodoPriority
 
     /// <summary>高。</summary>
     High,
+
+    /// <summary>紧急。追加在末尾，保持既有 JSON 中的枚举数值不变。</summary>
+    Urgent,
 }
 
 /// <summary>

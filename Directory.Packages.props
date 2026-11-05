@@ -5,25 +5,26 @@
     </PropertyGroup>
     <ItemGroup>
         <!-- Avalonia packages -->
-        <!-- Important: keep version in sync! -->
+        <!-- Important: keep version in sync! Material.Avalonia 3.21.0 依赖 Avalonia 12.1.1，
+             所以核心包统一固定在 12.1.1。 -->
         <!--
-          例外说明：Avalonia.Controls.WebView 目前只有 12.1.0 离线可得
-          （本地 packages/ 源里只有这个版本；它只要求 Avalonia >= 12.0.0，
-          与下方 12.0.3 组合可以正常 restore）。
-          两个方向的同步都已验证过但离线环境做不到：
-            - 全系升 12.1.0：Avalonia 12.1.0 核心包不在离线源/缓存（NU1101）；
-            - WebView 降 12.0.3：该版本不存在，NuGet 按「最低版本」语义会解到 12.1.0。
-          恢复联网后应把全系统一升到 12.1.0。
+          WebView 例外：按本阶段要求 Avalonia.Controls.WebView 保持 12.1.0（本地
+          packages/ 源里也只有这一个版本）。它只要求 Avalonia >= 12.0.0，与下方
+          12.1.1 核心包组合可以正常 restore；升级 WebView 不在本次范围内。
+          Material.Avalonia 仅在共享项目里引用，桌面端不会加载它的主题。
         -->
-        <PackageVersion Include="Avalonia" Version="12.0.3" />
-        <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.0.3" />
-        <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.0.3" />
-        <PackageVersion Include="Avalonia.Desktop" Version="12.0.3" />
-        <PackageVersion Include="Avalonia.iOS" Version="12.0.3" />
-        <PackageVersion Include="Avalonia.Browser" Version="12.0.3" />
-        <PackageVersion Include="Avalonia.Android" Version="12.0.3" />
+        <PackageVersion Include="Avalonia" Version="12.1.1" />
+        <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.1" />
+        <PackageVersion Include="Avalonia.Fonts.Inter" Version="12.1.1" />
+        <PackageVersion Include="Avalonia.Desktop" Version="12.1.1" />
+        <PackageVersion Include="Avalonia.iOS" Version="12.1.1" />
+        <PackageVersion Include="Avalonia.Browser" Version="12.1.1" />
+        <PackageVersion Include="Avalonia.Android" Version="12.1.1" />
         <!-- First-party WebView control (desktop heads), used for 雨课堂 QR login. -->
         <PackageVersion Include="Avalonia.Controls.WebView" Version="12.1.0" />
+
+        <!-- Android 第一阶段 Material 皮肤（主列表卡片 / 底部导航）。 -->
+        <PackageVersion Include="Material.Avalonia" Version="3.21.0" />
 
         <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
 

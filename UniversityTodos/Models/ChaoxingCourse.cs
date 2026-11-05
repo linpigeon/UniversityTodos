@@ -18,6 +18,15 @@ public sealed class ChaoxingCourse
     /// <summary>班级 id（超星的 clazzId）。</summary>
     public long ClazzId { get; init; }
 
+    /// <summary>
+    /// 选课关系 id（超星的 personId / cpi）。
+    /// <para>
+    /// 课程页 URL 的必需参数，与 <see cref="CourseId"/>、<see cref="ClazzId"/> 不能混用。
+    /// 旧缓存没有这个字段，反序列化后为 0；此时课程照常展示，只是不能直达课程页。
+    /// </para>
+    /// </summary>
+    public long PersonId { get; init; }
+
     /// <summary>课程名（如「信号与系统」）。</summary>
     public string CourseName { get; init; } = string.Empty;
 

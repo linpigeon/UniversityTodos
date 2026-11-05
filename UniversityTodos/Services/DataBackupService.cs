@@ -73,17 +73,81 @@ public static class DataBackupService
         var dir = Path.GetFullPath(dataDirectory);
         Directory.CreateDirectory(dir);
 
-        var count = 0;
-        using var zip = ZipFile.OpenRead(zipPath);
-        foreach (var entry in zip.Entries)
+        var stagingDir = Path.Combine(
+            Path.GetTempPath(), "UniversityTodos-restore-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(stagingDir);
+
+        var staged = new List<(string Name, string TempPath)>();
+        var changed = new List<(string Target, string? BackupPath)>();
+        try
         {
-            // 只认白名单文件名：entry.Name 去掉目录部分，配合白名单即可杜绝路径穿越。
-            if (!BusinessFiles.Contains(entry.Name, StringComparer.OrdinalIgnoreCase)) continue;
-            var destination = Path.Combine(dir, entry.Name);
-            entry.ExtractToFile(destination, overwrite: true);
-            count++;
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            using (var zip = ZipFile.OpenRead(zipPath))
+            {
+                foreach (var entry in zip.Entries)
+                {
+                    // 只认白名单文件名：entry.Name 去掉目录部分，配合白名单即可杜绝路径穿越。
+                    if (!BusinessFiles.Contains(entry.Name, StringComparer.OrdinalIgnoreCase)) continue;
+                    if (!seen.Add(entry.Name))
+                        throw new InvalidDataException($"备份中存在重复条目：{entry.Name}");
+
+                    var name = BusinessFiles.Single(n =>
+                        string.Equals(n, entry.Name, StringComparison.OrdinalIgnoreCase));
+                    var tempPath = Path.Combine(stagingDir, name);
+                    entry.ExtractToFile(tempPath, overwrite: false);
+                    staged.Add((name, tempPath));
+                }
+            }
+
+            foreach (var (name, tempPath) in staged)
+            {
+                var target = Path.Combine(dir, name);
+                string? backupPath = null;
+                if (File.Exists(target))
+                {
+                    backupPath = Path.Combine(stagingDir, "backup-" + name);
+                    File.Copy(target, backupPath);
+                }
+
+                // 在写入前登记，目标被部分覆盖后抛出异常时也必须回滚。
+                changed.Add((target, backupPath));
+                File.Copy(tempPath, target, overwrite: true);
+            }
+
+            return staged.Count;
         }
-        return count;
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            var rollbackErrors = new List<string>();
+            for (var i = changed.Count - 1; i >= 0; i--)
+            {
+                var (target, backupPath) = changed[i];
+                try
+                {
+                    if (backupPath is null)
+                    {
+                        if (File.Exists(target)) File.Delete(target);
+                    }
+                    else
+                    {
+                        File.Copy(backupPath, target, overwrite: true);
+                    }
+                }
+                catch (Exception rollbackEx) when (rollbackEx is IOException or UnauthorizedAccessException)
+                {
+                    rollbackErrors.Add($"{Path.GetFileName(target)}：{rollbackEx.Message}");
+                }
+            }
+
+            if (rollbackErrors.Count > 0)
+                throw new IOException(
+                    $"恢复失败，且回滚未完成：{ex.Message}；回滚失败：{string.Join("；", rollbackErrors)}", ex);
+            throw new IOException($"恢复失败（已回滚本次改动）：{ex.Message}", ex);
+        }
+        finally
+        {
+            try { Directory.Delete(stagingDir, recursive: true); } catch { }
+        }
     }
 
     /// <summary>恢复前把当前数据另存一份到临时目录，返回路径（失败返回 null）。</summary>

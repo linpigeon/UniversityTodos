@@ -34,6 +34,13 @@ public partial class App : Application
     public static Func<Avalonia.Controls.Control>? MobileShellFactory { get; set; }
 
     /// <summary>
+    /// 平台主题钩子：Android 头在启动时注入 Material 主题适配器。
+    /// null = 保留 App.axaml 里的 FluentTheme（桌面生产路径默认如此）。
+    /// 在 <see cref="Initialize"/> 加载完 App.axaml 之后调用，且只调用一次。
+    /// </summary>
+    public static Action<Application>? MobileThemeHook { get; set; }
+
+    /// <summary>
     /// WebView 链路测试的窗口构建钩子。
     /// 用委托是因为共享项目不能反向引用桌面项目（Desktop 引用了共享项目）。
     /// </summary>
@@ -54,6 +61,8 @@ public partial class App : Application
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
+        // 默认 null：桌面端保持 App.axaml 里的 FluentTheme 不变。
+        MobileThemeHook?.Invoke(this);
     }
 
     // ---------------- 系统托盘 ----------------

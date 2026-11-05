@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
@@ -250,15 +253,28 @@ public static class JsonSelfTest
                     ],
                     Announcements =
                     [
-                        new TodoItem { Id = "ann-100-7", Kind = TodoKind.Announcement, Title = "公告X", ClassroomId = 100 },
+                        // NoticeId 是新增的持久化字段（公告详情 id）；源生成上下文漏掉它时这里会读回 null。
+                        new TodoItem
+                        {
+                            Id = "ann-100-7", Kind = TodoKind.Announcement, Title = "公告X",
+                            ClassroomId = 100, NoticeId = 9004135,
+                        },
                     ],
                     ChaoxingCourses =
                     [
                         new ChaoxingCourse
                         {
-                            CourseId = 244459960, ClazzId = 153050293, CourseName = "信号与系统",
+                            CourseId = 244459960, ClazzId = 153050293, PersonId = 500602665,
+                            CourseName = "信号与系统",
                             ClazzName = "2026-2027-1-通信", PendingTaskPoints = 3,
                             Leaves = [new ChaoxingTaskPoint { ChapterNumber = "4.5", Name = "傅里叶变换的性质", PendingCount = 3 }],
+                        },
+                        new ChaoxingCourse
+                        {
+                            CourseId = 244459960, ClazzId = 153050294, PersonId = 500602666,
+                            CourseName = "信号与系统",
+                            ClazzName = "2026-2027-1-电子", PendingTaskPoints = 5,
+                            Leaves = [new ChaoxingTaskPoint { ChapterNumber = "5.1", Name = "拉普拉斯变换", PendingCount = 5 }],
                         },
                         // 坏条目：缺课程名，加载时必须被剔除。
                         new ChaoxingCourse { CourseId = 9, ClazzId = 9 },
@@ -272,18 +288,28 @@ public static class JsonSelfTest
                        && loaded.Homework.Count == 1
                        && loaded.Homework[0] is { Id: "hw-100-200", Status: TodoStatus.InProgress, Done: 1, Total: 3 }
                        && loaded.Announcements.Count == 1
+                       && loaded.Announcements[0] is { NoticeId: 9004135 }
                        && loaded.CourseSignatures[100] == "sig"
                        && loaded.CourseCount == 2,
                     "待办缓存往返不符（含坏条目剔除）");
+                Assert(loaded!.Announcements[0].SourceUrl == YktUrls.Notice(100, 9004135),
+                    "缓存加载应按 NoticeId 恢复公告详情链接，实际 " + loaded.Announcements[0].SourceUrl);
 
                 // 课程维度汇总也必须能往返（源生成上下文漏注册会静默丢字段）。
                 Assert(loaded is not null,
                     "缓存反序列化结果为 null");
-                Assert(loaded!.ChaoxingCourses.Count == 1
+                Assert(loaded!.ChaoxingCourses.Count == 2
                        && loaded.ChaoxingCourses[0].PendingTaskPoints == 3
+                       && loaded.ChaoxingCourses[0].PersonId == 500602665
                        && loaded.ChaoxingCourses[0].Leaves.Count == 1
                        && loaded.ChaoxingCourses[0].Leaves[0].Name == "傅里叶变换的性质",
                     $"课程汇总未正确往返：{loaded.ChaoxingCourses.Count} 门");
+                var secondClass = loaded.ChaoxingCourses.Single(c => c.ClazzId == 153050294);
+                Assert(secondClass.ClazzName == "2026-2027-1-电子"
+                       && secondClass.PersonId == 500602666
+                       && secondClass.PendingTaskPoints == 5
+                       && secondClass.Leaves.Single().Name == "拉普拉斯变换",
+                    "同 CourseId 的第二个班级、personId 及其任务点明细必须完整往返");
 
                 // 坏课程（缺课程名 / id 不成立 / 重复）应被剔除。
                 Assert(loaded.ChaoxingCourses.All(c => !string.IsNullOrWhiteSpace(c.CourseName) && c.CourseId > 0),
@@ -291,6 +317,178 @@ public static class JsonSelfTest
 
                 store.ClearAsync().GetAwaiter().GetResult();
                 Assert(store.LoadAsync().GetAwaiter().GetResult() is null, "缓存清除后应读不到");
+            });
+
+            Check("旧缓存课程缺 PersonId 仍加载且不生成直达链接", () =>
+            {
+                // 本改动之前的 todos.json 没有 PersonId 字段；加载后应为 0，课程不能丢，
+                // 但直达 URL 必须为 null（拼 courseid/clazzid/vc/cpi 时缺一个就会开错页）。
+                const string legacyJson = """
+                    {
+                      "SchemaVersion": 1,
+                      "SyncedAt": "2026-09-20T12:00:00+08:00",
+                      "ChaoxingCourses": [
+                        {
+                          "CourseId": 244459960,
+                          "ClazzId": 153050293,
+                          "CourseName": "信号与系统",
+                          "ClazzName": "2026-2027-1-通信",
+                          "PendingTaskPoints": 3,
+                          "Leaves": []
+                        }
+                      ]
+                    }
+                    """;
+                var legacyDir = Path.Combine(tempDir, "legacy-courses");
+                Directory.CreateDirectory(legacyDir);
+                File.WriteAllText(Path.Combine(legacyDir, "todos.json"), legacyJson);
+
+                var legacy = new TodoCacheStore(legacyDir).LoadAsync().GetAwaiter().GetResult();
+                Assert(legacy is { ChaoxingCourses.Count: 1 },
+                    $"旧缓存没有 PersonId 时不应丢课程，实际 {legacy?.ChaoxingCourses.Count} 门");
+                var course = legacy!.ChaoxingCourses[0];
+                Assert(course.PersonId == 0, $"旧缓存 personId 应默认为 0，实际 {course.PersonId}");
+
+                var vm = new ChaoxingCourseViewModel(course);
+                Assert(!vm.CanOpenCourse && vm.CourseUrl is null,
+                    "旧缓存课程不应生成直达 URL");
+                Assert(vm.OpenCourseToolTip.Contains("同步", StringComparison.Ordinal),
+                    "旧缓存课程的按钮提示应说明需要先同步");
+            });
+
+            Check("课程列表替换：选中态按 (CourseId, ClazzId) 迁移到新对象", () =>
+            {
+                // 回归：ReplaceCourses 每次同步都换一批新 VM。只替换集合、不迁移选中态的话，
+                // 用户先选中旧缓存里的课程（缺 PersonId、按钮禁用），后台同步成功后详情面板
+                // 仍绑着旧对象，直达按钮会一直禁用，必须重新点一次同一门课才能恢复。
+                static ChaoxingCourseViewModel Course(
+                    long courseId, long clazzId, long personId, string name) =>
+                    new(new ChaoxingCourse
+                    {
+                        CourseId = courseId,
+                        ClazzId = clazzId,
+                        PersonId = personId,
+                        CourseName = name,
+                    });
+
+                var list = new TodoListViewModel();
+                var staleTarget = Course(244459960, 153050293, 0, "信号与系统");
+                var staleOther = Course(266218466, 152328665, 500602665, "人工智能与法律");
+                list.ReplaceCourses([staleTarget, staleOther]);
+                list.SelectedCourse = staleTarget;
+
+                Assert(ReferenceEquals(list.SelectedCourse, staleTarget) && staleTarget.IsSelected,
+                    "前置：旧缓存课程应处于选中态");
+                Assert(!staleTarget.CanOpenCourse, "前置：旧缓存课程缺 PersonId，不能直达");
+
+                // 后台同步成功：同一门课换了带 PersonId 的新对象。
+                var refreshedTarget = Course(244459960, 153050293, 500602665, "信号与系统");
+                var refreshedOther = Course(266218466, 152328665, 500602665, "人工智能与法律");
+                list.ReplaceCourses([refreshedTarget, refreshedOther]);
+
+                Assert(ReferenceEquals(list.SelectedCourse, refreshedTarget),
+                    "替换课程列表后应自动选中同一门课的新对象");
+                Assert(list.SelectedCourse!.CanOpenCourse,
+                    "新对象带 PersonId，迁移后应立刻恢复直达能力");
+                Assert(refreshedTarget.IsSelected && !refreshedOther.IsSelected,
+                    "新集合中只应有选中的那门课高亮");
+                Assert(!staleTarget.IsSelected && !staleOther.IsSelected,
+                    "已离开集合的旧对象不应残留高亮");
+
+                // 课程消失（退课 / 本次同步没有它）：清空选中，详情回到空态。
+                var onlyOther = Course(266218466, 152328665, 500602665, "人工智能与法律");
+                list.ReplaceCourses([onlyOther]);
+
+                Assert(list.SelectedCourse is null && !list.HasSelectedCourse,
+                    "替换后不含原来选中的课程时应清空选中");
+                Assert(!refreshedTarget.IsSelected && !onlyOther.IsSelected,
+                    "清空选中后新旧对象都不应高亮");
+            });
+
+            Check("旧缓存公告不猜详情，新缓存按 NoticeId 恢复", () =>
+            {
+                // 真实样本：26109213 的 type=9 日志 id=33917170、courseware_id=9004135。
+                // 旧缓存没有 NoticeId，无法离线推导正确 noticeId：旧 noticeView 一律作废，
+                // 旧 CourseLog/空链接保持原样；新缓存按 NoticeId 重建，不依赖链接字符串。
+                const long room = 26109213;
+                const long actId = 33917170;
+                const long noticeId = 9004135;
+                var store = new TodoCacheStore(Path.Combine(tempDir, "legacy-announcements"));
+                var oldCourseLog = YktUrls.CourseLog(room, 3214);
+                var buggyId = $"ann-{room}-{actId}";
+                var courseLogId = $"ann-{room}-{actId + 1}";
+                var emptyId = $"ann-{room}-{actId + 2}";
+                var unverifiedNoticeId = $"ann-{room}-{actId + 3}";
+                var newCacheId = $"ann-{room}-{actId + 4}";
+
+                store.SaveAsync(new TodoCacheFile
+                {
+                    SyncedAt = new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.FromHours(8)),
+                    Announcements =
+                    [
+                        // 上一版错误深链：noticeView 尾段就是 act.Id → 不可信，必须作废。
+                        new TodoItem
+                        {
+                            Id = buggyId, Kind = TodoKind.Announcement, Title = "旧派生错误深链",
+                            ClassroomId = room, SourceUrl = YktUrls.Notice(room, actId),
+                        },
+                        // 旧版本课程日志页：保持原样，不凭 act.Id 猜详情。
+                        new TodoItem
+                        {
+                            Id = courseLogId, Kind = TodoKind.Announcement, Title = "旧课程日志链接",
+                            ClassroomId = room, IsRead = true, SourceUrl = oldCourseLog,
+                        },
+                        // 更早的缓存可能连链接都没有：保持空，打开时回落课程页。
+                        new TodoItem
+                        {
+                            Id = emptyId, Kind = TodoKind.Announcement, Title = "无链接旧公告",
+                            ClassroomId = room,
+                        },
+                        // 即便旧缓存里的 noticeView 看起来正确，没有 NoticeId 也无法证明来源。
+                        new TodoItem
+                        {
+                            Id = unverifiedNoticeId, Kind = TodoKind.Announcement, Title = "旧缓存未验证深链",
+                            ClassroomId = room, SourceUrl = YktUrls.Notice(room, noticeId),
+                        },
+                        // 新缓存：同步时已把 courseware_id 落盘为 NoticeId，冷启动可据此恢复。
+                        new TodoItem
+                        {
+                            Id = newCacheId, Kind = TodoKind.Announcement, Title = "新缓存公告",
+                            ClassroomId = room, NoticeId = noticeId, SourceUrl = oldCourseLog,
+                        },
+                    ],
+                }).GetAwaiter().GetResult();
+
+                var loaded = store.LoadAsync().GetAwaiter().GetResult();
+                Assert(loaded is not null && loaded.Announcements.Count == 5,
+                    $"公告缓存应全部加载，实际 {loaded?.Announcements.Count ?? 0} 条");
+                Assert(loaded!.Announcements.Select(a => a.Id)
+                        .SequenceEqual([buggyId, courseLogId, emptyId, unverifiedNoticeId, newCacheId]),
+                    "加载不得改动公告稳定 Id 或顺序");
+
+                var buggy = loaded.Announcements.Single(a => a.Id == buggyId);
+                Assert(buggy.SourceUrl is null,
+                    $"上一版从 act.Id 派生的错误详情链接必须作废，实际 {buggy.SourceUrl}");
+
+                var courseLog = loaded.Announcements.Single(a => a.Id == courseLogId);
+                Assert(courseLog.SourceUrl == oldCourseLog && courseLog.IsRead,
+                    $"旧课程日志链接应原样保留且不改已读，实际 {courseLog.SourceUrl}");
+
+                Assert(loaded.Announcements.Single(a => a.Id == emptyId).SourceUrl is null,
+                    "空链接不应被猜成详情深链");
+
+                Assert(loaded.Announcements.Single(a => a.Id == unverifiedNoticeId).SourceUrl is null,
+                    "没有 NoticeId 的旧 noticeView 链接无法证明来源，不应继续被信任");
+
+                var newCache = loaded.Announcements.Single(a => a.Id == newCacheId);
+                Assert(newCache.NoticeId == noticeId,
+                    $"NoticeId 缓存往返不符：{newCache.NoticeId}");
+                Assert(newCache.SourceUrl == YktUrls.Notice(room, noticeId),
+                    $"新缓存应据 NoticeId 重建详情深链，实际 {newCache.SourceUrl}");
+
+                Assert(loaded.Announcements.Count(a =>
+                        a.SourceUrl?.Contains("noticeView", StringComparison.Ordinal) == true) == 1,
+                    "只有带 NoticeId 的那条公告应恢复为详情深链");
             });
 
             Check("冷启动缓存三路合并按 Id 去重", () =>
@@ -315,6 +513,191 @@ public static class JsonSelfTest
                 var merged = MainViewModel.MergeCachedHomework(cache);
                 Assert(merged.Count == 1 && merged[0].Id == item.Id,
                     $"三路合并应按 Id 去重，实际 {merged.Count} 条");
+            });
+
+            Check("附加来源合并：成功空清空、失败保留缓存", () =>
+            {
+                var anchor = new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.FromHours(8));
+                var oldCx = new TodoItem
+                {
+                    Id = "hw-cx-old", Kind = TodoKind.Homework, Title = "旧学习通",
+                    DueAt = null, DeadlineAnchor = anchor, RemainingAtSync = TimeSpan.FromHours(2),
+                };
+                var oldPg = Hw("hw-pg-old", "旧批改网", TodoStatus.NotStarted);
+                var newCx = Hw("hw-cx-new", "新学习通", TodoStatus.NotStarted);
+                var newPg = Hw("hw-pg-new", "新批改网", TodoStatus.NotStarted);
+                var oldCourse = new ChaoxingCourse
+                {
+                    CourseId = 1, ClazzId = 2, CourseName = "旧课程", PendingTaskPoints = 2,
+                };
+                var newCourse = new ChaoxingCourse
+                {
+                    CourseId = 3, ClazzId = 4, CourseName = "新课程", PendingTaskPoints = 1,
+                };
+                var previous = new TodoCacheFile
+                {
+                    Chaoxing = [oldCx], Pigai = [oldPg], ChaoxingCourses = [oldCourse],
+                };
+                var ykt = Hw("hw-1-1", "雨课堂作业", TodoStatus.NotStarted);
+                var baseResult = new SyncResult
+                {
+                    Homework = [ykt], HomeworkForCache = [ykt], Warnings = ["雨课堂警告"],
+                };
+
+                SyncResult Merge(ExtraSourceState cxState, ExtraSourceState pgState, bool empty = false) =>
+                    SourceSyncCoordinator.MergeExtraSources(
+                        baseResult, previous,
+                        empty ? [] : [newCx], empty ? [] : [newCx], empty ? [] : [newCourse], cxState,
+                        empty ? [] : [newPg], pgState, ["附加警告"]);
+
+                var bothOk = Merge(ExtraSourceState.Success, ExtraSourceState.Success);
+                Assert(bothOk.Homework.Select(i => i.Id).SequenceEqual(["hw-1-1", "hw-cx-new", "hw-pg-new"])
+                       && bothOk.ChaoxingForCache.Single().Id == "hw-cx-new"
+                       && bothOk.PigaiForCache.Single().Id == "hw-pg-new"
+                       && bothOk.ChaoxingCourses.Single().CourseId == 3,
+                    "两路成功时必须使用新条目、新缓存与新课程");
+                Assert(bothOk.Warnings.SequenceEqual(["雨课堂警告", "附加警告"]), "合并必须保留全部警告");
+
+                var emptyOk = Merge(ExtraSourceState.Success, ExtraSourceState.Success, empty: true);
+                Assert(emptyOk.Homework.Single().Id == "hw-1-1"
+                       && emptyOk.ChaoxingForCache.Count == 0 && emptyOk.PigaiForCache.Count == 0
+                       && emptyOk.ChaoxingCourses.Count == 0,
+                    "成功空结果必须清空对应来源");
+
+                var cxFailed = Merge(ExtraSourceState.Failed, ExtraSourceState.Success);
+                Assert(cxFailed.Homework.Select(i => i.Id).SequenceEqual(["hw-1-1", "hw-cx-old", "hw-pg-new"])
+                       && cxFailed.ChaoxingForCache.Single().Id == "hw-cx-old"
+                       && cxFailed.ChaoxingCourses.Single().CourseId == 1,
+                    "学习通失败应保留旧学习通，批改网仍使用新结果");
+                var cachedCx = cxFailed.Homework.Single(i => i.Id == "hw-cx-old");
+                Assert(cachedCx.DueAt is null && cachedCx.EffectiveDueAt == anchor.AddHours(2)
+                       && cxFailed.ChaoxingForCache.Single().DeadlineAnchor == anchor
+                       && cxFailed.ChaoxingForCache.Single().RemainingAtSync == TimeSpan.FromHours(2),
+                    "失败保留真实缓存形态时，EffectiveDueAt 必须仍由基准与相对量还原");
+
+                var pgFailed = Merge(ExtraSourceState.Success, ExtraSourceState.Failed);
+                Assert(pgFailed.Homework.Select(i => i.Id).SequenceEqual(["hw-1-1", "hw-cx-new", "hw-pg-old"])
+                       && pgFailed.PigaiForCache.Single().Id == "hw-pg-old"
+                       && pgFailed.ChaoxingForCache.Single().Id == "hw-cx-new",
+                    "批改网失败应保留旧批改网，学习通仍使用新结果");
+
+                var bothFailed = Merge(ExtraSourceState.Failed, ExtraSourceState.Failed);
+                Assert(bothFailed.Homework.Select(i => i.Id).SequenceEqual(["hw-1-1", "hw-cx-old", "hw-pg-old"])
+                       && bothFailed.ChaoxingCourses.Single().CourseId == 1,
+                    "双来源失败应保留两路旧缓存与课程");
+
+                var loggedOut = Merge(ExtraSourceState.NotLoggedIn, ExtraSourceState.NotLoggedIn, empty: true);
+                Assert(loggedOut.Homework.Select(i => i.Id).SequenceEqual(["hw-1-1", "hw-cx-old", "hw-pg-old"])
+                       && loggedOut.ChaoxingCourses.Single().CourseId == 1,
+                    "未登录或登录失效后的后续同步仍应保留离线缓存，显式退出负责清除");
+
+                var noPrevious = SourceSyncCoordinator.MergeExtraSources(
+                    baseResult, null, [], [], [], ExtraSourceState.Failed,
+                    [], ExtraSourceState.Failed, []);
+                Assert(noPrevious.Homework.Single().Id == "hw-1-1"
+                       && noPrevious.ChaoxingForCache.Count == 0 && noPrevious.PigaiForCache.Count == 0
+                       && noPrevious.ChaoxingCourses.Count == 0,
+                    "旧缓存为空时失败不得凭空造条目");
+            });
+
+            Check("三源同步：等待结果前已同时启动", () =>
+            {
+                var started = new List<string>();
+                async Task<T> Track<T>(string name, T value)
+                {
+                    started.Add(name);
+                    await Task.Delay(60);
+                    return value;
+                }
+
+                var dependencies = new SourceSyncDependencies
+                {
+                    Ykt = (_, _, _, _) => Track("ykt", new SyncResult()),
+                    Chaoxing = (_, _, _, _) => Track(
+                        "chaoxing",
+                        new ChaoxingSyncOutcome([], [], [], ExtraSourceState.Success, false, [])),
+                    Pigai = (_, _) => Track(
+                        "pigai",
+                        new PigaiSyncOutcome([], ExtraSourceState.Success, false, [])),
+                };
+
+                var pending = SourceSyncCoordinator.SyncAsync(
+                    null, null, null, null, null, CancellationToken.None, dependencies);
+                Assert(started.Count == 3 && started.Contains("ykt")
+                       && started.Contains("chaoxing") && started.Contains("pigai"),
+                    $"任一来源完成前就应启动全部三源，实际：{string.Join(",", started)}");
+                var batch = pending.GetAwaiter().GetResult();
+                Assert(batch.Result.Homework.Count == 0, "空结果合并后仍应为空");
+            });
+
+            Check("待办缓存：增量复用、变化替换与选中态保留", () =>
+            {
+                TodoItem Model(string title) => new()
+                {
+                    Id = "hw-incremental",
+                    Kind = TodoKind.Homework,
+                    Title = title,
+                    CourseName = "课程",
+                    ClassroomId = 1,
+                };
+                var local = new LocalState();
+                local.Done.Add("hw-incremental");
+                local.Starred.Add("hw-incremental");
+
+                var initial = TodoCacheCoordinator.Reconcile(
+                    [], new SyncResult { Homework = [Model("原标题")] }, [], local).Items.Single();
+                initial.IsSelected = true;
+                var unchanged = TodoCacheCoordinator.Reconcile(
+                    [initial], new SyncResult { Homework = [Model("原标题")] }, [], local);
+                Assert(ReferenceEquals(initial, unchanged.Items.Single()) && unchanged.ReusedCount == 1,
+                    "内容未变化时必须复用原 ViewModel");
+
+                var changed = TodoCacheCoordinator.Reconcile(
+                    [initial], new SyncResult { Homework = [Model("新标题")] }, [], local).Items.Single();
+                Assert(!ReferenceEquals(initial, changed) && changed.Title == "新标题",
+                    "内容变化时应替换 ViewModel");
+                Assert(changed.IsSelected && changed.IsDone && changed.IsStarred,
+                    "替换后必须保留选中态与本地标记");
+            });
+
+            Check("列表增量更新：无变化不重置、排序使用 Move", () =>
+            {
+                TodoItemViewModel Item(string id) => new(new TodoItem
+                {
+                    Id = id, Kind = TodoKind.Homework, Title = id, ClassroomId = 1,
+                });
+                var a = Item("hw-a");
+                var b = Item("hw-b");
+                var list = new TodoListViewModel { HideLocallyDone = false };
+                list.Replace([a, b]);
+
+                var events = new List<NotifyCollectionChangedAction>();
+                list.Items.CollectionChanged += (_, e) => events.Add(e.Action);
+                list.Replace([a, b]);
+                Assert(events.Count == 0, "相同对象与顺序不应触发集合重置或逐条添加");
+
+                list.Replace([b, a]);
+                Assert(events.Contains(NotifyCollectionChangedAction.Move)
+                       && !events.Contains(NotifyCollectionChangedAction.Reset),
+                    "排序变化应使用 Move 而不是 Reset");
+                Assert(ReferenceEquals(list.Items[0], b) && ReferenceEquals(list.Items[1], a),
+                    "Move 后顺序不符");
+
+                var course = new ChaoxingCourseViewModel(new ChaoxingCourse
+                {
+                    CourseId = 1, ClazzId = 2, PersonId = 3, CourseName = "课程", PendingTaskPoints = 1,
+                });
+                list.ReplaceCourses([course]);
+                list.SelectedCourse = course;
+                list.ReplaceCourseModels([
+                    new ChaoxingCourse
+                    {
+                        CourseId = 1, ClazzId = 2, PersonId = 3, CourseName = "课程", PendingTaskPoints = 1,
+                    },
+                ]);
+                Assert(ReferenceEquals(list.Courses.Single(), course)
+                       && ReferenceEquals(list.SelectedCourse, course),
+                    "课程内容未变时应复用课程行并保留选中态");
             });
 
             Check("学习通条目缓存往返（相对时间还原）", () =>
@@ -549,6 +932,62 @@ public static class JsonSelfTest
                     "课程名/班级名不符");
                 Assert(ykt.IsRetired, "isretire=1 应识别为已结课");
                 Assert(!courses[1].IsRetired, "isretire=0 不应识别为已结课");
+                var second = courses[1];
+                Assert(second.CourseId == 266218466 && second.ClazzId == 152328665
+                       && second.PersonId == 500602665,
+                    $"第二个班级三元组解析错位：course={second.CourseId} clazz={second.ClazzId} person={second.PersonId}");
+            });
+
+            Check("学习通课程直达链接（courseid/clazzid/vc/cpi）", () =>
+            {
+                const string expected =
+                    "https://mooc1-2.chaoxing.com/visit/stucoursemiddle" +
+                    "?courseid=244459960&clazzid=153050293&vc=1&cpi=500602665";
+                Assert(ChaoxingUrls.CoursePage(244459960, 153050293, 500602665) == expected,
+                    "课程页 URL 的参数顺序/名称/值不符");
+
+                // 任一 id 缺失或非正数都不能拼出一个看似可用、实际打开空白页的链接。
+                Assert(ChaoxingUrls.CoursePage(0, 153050293, 500602665) is null, "courseId=0 不应生成 URL");
+                Assert(ChaoxingUrls.CoursePage(244459960, 0, 500602665) is null, "clazzId=0 不应生成 URL");
+                Assert(ChaoxingUrls.CoursePage(244459960, 153050293, 0) is null, "personId=0 不应生成 URL");
+                Assert(ChaoxingUrls.CoursePage(-1, 153050293, 500602665) is null, "负 courseId 不应生成 URL");
+                Assert(ChaoxingUrls.CoursePage(244459960, -1, 500602665) is null, "负 clazzId 不应生成 URL");
+                Assert(ChaoxingUrls.CoursePage(244459960, 153050293, -1) is null, "负 personId 不应生成 URL");
+
+                var vm = new ChaoxingCourseViewModel(new ChaoxingCourse
+                {
+                    CourseId = 244459960,
+                    ClazzId = 153050293,
+                    PersonId = 500602665,
+                    CourseName = "信号与系统",
+                });
+                Assert(vm.CanOpenCourse && vm.CourseUrl == expected,
+                    "课程视图模型未暴露正确的直达链接");
+
+                // 桌面分支必须把同一个 URL 交给平台层；旧缓存（personId=0）点了不能开。
+                var previousServices = MainViewModel.PlatformServices;
+                var opened = new List<string>();
+                try
+                {
+                    MainViewModel.PlatformServices = new RecordingPlatformServices(opened);
+                    var main = new MainViewModel();
+                    main.OpenChaoxingCourse(vm);
+                    Assert(opened.Count == 1 && opened[0] == expected,
+                        $"桌面打开课程应调用 OpenUrl({expected})，实际 {opened.Count} 次");
+
+                    main.OpenChaoxingCourse(new ChaoxingCourseViewModel(new ChaoxingCourse
+                    {
+                        CourseId = 244459960,
+                        ClazzId = 153050293,
+                        PersonId = 0,
+                        CourseName = "信号与系统",
+                    }));
+                    Assert(opened.Count == 1, "缺少 personId 时不应发起打开");
+                }
+                finally
+                {
+                    MainViewModel.PlatformServices = previousServices;
+                }
             });
 
             Check("学习通任务点解析（只算叶子，防父层汇总重复计数）", () =>
@@ -1039,6 +1478,113 @@ public static class JsonSelfTest
                 $"章节作业深链不符：{byTitle["章节作业"].SourceUrl}");
             Assert(byTitle["缺字段作业"].SourceUrl!.Contains("/v2/web/studentLog/100"),
                 $"缺字段时应回落课程页：{byTitle["缺字段作业"].SourceUrl}");
+        });
+
+        Check("公告深链构造：noticeId 取 courseware_id", () =>
+        {
+            // 真实响应形态（本机 2026-09-16 离线样本）：26109213 的 type=9 日志
+            // id=33917170、courseware_id="9004135"，两者明显不同。
+            const long room = 26109213;
+            const long actId = 33917170;
+            const long noticeId = 9004135;
+
+            // 用户给出的 26109238/9443023 示例；日志 id 取该课缓存里的另一条，确保不同。
+            const long userRoom = 26109238;
+            const long userActId = 34971048;
+            const long userNoticeId = 9443023;
+
+            var api = new FakeYktApi(
+                [Course(room, "课程A"), Course(userRoom, "课程B")],
+                new Dictionary<long, List<YktActivity>>
+                {
+                    [room] =
+                    [
+                        AnnActivity(actId, "考试安排通知", hasRead: false, coursewareId: "9004135"),
+                        AnnActivity(actId + 1, "已读公告", hasRead: true, coursewareId: "9004136"),
+                        // courseware_id 缺失 / 非数字 / 不为正数：回落课程日志页，不拿日志 id 猜。
+                        AnnActivity(actId + 2, "缺 courseware_id", hasRead: false),
+                        AnnActivity(actId + 3, "courseware_id 非数字", hasRead: false, coursewareId: "abc"),
+                        AnnActivity(actId + 4, "courseware_id 为零", hasRead: false, coursewareId: "0"),
+                        AnnActivity(actId + 5, "courseware_id 为负", hasRead: false, coursewareId: "-1"),
+                    ],
+                    [userRoom] =
+                    [
+                        AnnActivity(userActId, "用户示例公告", hasRead: false, coursewareId: "9443023"),
+                    ],
+                });
+
+            var r = new SyncService(api).SyncAsync(null).GetAwaiter().GetResult();
+            Assert(r.Announcements.Count == 7, $"应同步出 7 条公告，实际 {r.Announcements.Count} 条");
+
+            var unread = r.Announcements.Single(a => a.Id == $"ann-{room}-{actId}");
+            Assert(unread.SourceUrl == YktUrls.Notice(room, noticeId),
+                $"公告链接应等于 YktUrls.Notice({room}, {noticeId})，实际 {unread.SourceUrl}");
+            Assert(unread.SourceUrl
+                    == "https://changjiang.yuketang.cn/v2/web/noticeView/26109213/9004135?identity=0&type=9",
+                $"公告深链参数不符：{unread.SourceUrl}");
+            Assert(unread.NoticeId == noticeId,
+                $"公告应持久化 courseware_id 解析出的 NoticeId，实际 {unread.NoticeId}");
+            Assert(!unread.SourceUrl!.Contains(actId.ToString(CultureInfo.InvariantCulture),
+                    StringComparison.Ordinal),
+                $"公告链接不得使用日志自身的 id（{actId}）：{unread.SourceUrl}");
+            Assert(!unread.SourceUrl!.Contains("studentLog", StringComparison.Ordinal),
+                $"公告链接不应落到课程日志页：{unread.SourceUrl}");
+            Assert(unread.Kind == TodoKind.Announcement, "公告类型不应因链接修改而变化");
+            Assert(!unread.IsRead, "hasRead=false 应映射为未读");
+
+            var read = r.Announcements.Single(a => a.Id == $"ann-{room}-{actId + 1}");
+            Assert(read.IsRead, "hasRead=true 应映射为已读");
+            Assert(read.SourceUrl == YktUrls.Notice(room, 9004136) && read.NoticeId == 9004136,
+                $"已读公告的链接同样应取 courseware_id，实际 {read.SourceUrl}");
+
+            var userExample = r.Announcements.Single(a => a.Id == $"ann-{userRoom}-{userActId}");
+            Assert(userExample.SourceUrl
+                    == "https://changjiang.yuketang.cn/v2/web/noticeView/26109238/9443023?identity=0&type=9",
+                $"用户示例公告链接不符：{userExample.SourceUrl}");
+            Assert(userExample.NoticeId == userNoticeId
+                   && !userExample.SourceUrl!.Contains(userActId.ToString(CultureInfo.InvariantCulture),
+                       StringComparison.Ordinal),
+                $"用户示例公告不得使用日志自身的 id（{userActId}）：{userExample.SourceUrl}");
+
+            for (var i = 2; i <= 5; i++)
+            {
+                var fallback = r.Announcements.Single(a => a.Id == $"ann-{room}-{actId + i}");
+                Assert(fallback.NoticeId is null,
+                    $"courseware_id 不可用时不应落盘 NoticeId：{fallback.NoticeId}");
+                Assert(fallback.SourceUrl!.Contains($"/v2/web/studentLog/{room}", StringComparison.Ordinal),
+                    $"courseware_id 不可用时公告应回落课程日志页：{fallback.SourceUrl}");
+                Assert(!fallback.SourceUrl!.Contains("noticeView", StringComparison.Ordinal),
+                    $"courseware_id 不可用时不得跳到错误公告：{fallback.SourceUrl}");
+            }
+        });
+
+        Check("打开按钮文案：公告明确写「该公告」", () =>
+        {
+            static ViewModels.TodoItemViewModel Vm(TodoKind kind) => new(new TodoItem
+            {
+                Id = kind == TodoKind.Homework ? "hw-1-1" : "ann-1-1",
+                Kind = kind,
+                Title = "标题",
+                Status = TodoStatus.Unknown,
+            });
+
+            var isAndroid = OperatingSystem.IsAndroid();
+            var announcement = Vm(TodoKind.Announcement);
+            Assert(announcement.OpenButtonText
+                    == (isAndroid ? "在雨课堂中打开该公告" : "在浏览器中打开该公告"),
+                $"公告按钮文案不符：{announcement.OpenButtonText}");
+            Assert(!announcement.OpenButtonText.Contains("该课程", StringComparison.Ordinal),
+                $"公告按钮不应再写「该课程」：{announcement.OpenButtonText}");
+
+            var homework = Vm(TodoKind.Homework);
+            Assert(homework.OpenButtonText
+                    == (isAndroid ? "在雨课堂中打开该作业" : "在浏览器中打开该作业"),
+                $"作业按钮文案不符：{homework.OpenButtonText}");
+
+            // 自建事项的按钮被 ShowOpenButton 隐藏，文案仍保持「该课程」兜底。
+            var custom = Vm(TodoKind.Custom);
+            Assert(custom.OpenButtonText.EndsWith("该课程", StringComparison.Ordinal),
+                $"其他非作业类型应保留课程兜底文案：{custom.OpenButtonText}");
         });
 
         // ---------------- 课表（教务系统导入） ----------------
@@ -1640,6 +2186,54 @@ public static class JsonSelfTest
             Assert(tiny >= 7 * TimetableLayout.MinDayWidth, $"窄窗口下单天不应小于 {TimetableLayout.MinDayWidth}px，实际 {tiny}");
         });
 
+        Check("课表：紧凑模式几何（只扣一次 / 七列同屏 / 多栏最小宽）", () =>
+        {
+            // 默认 RequiredDaysWidth 行为不变（桌面 116/78）。
+            var desktop = TimetableLayout.RequiredDaysWidth(846, 7, 1);
+            Assert(Math.Abs(desktop - 846) < 1, $"桌面默认无冲突时应铺满 846，实际 {desktop}");
+            var desktopNarrow = TimetableLayout.RequiredDaysWidth(846, 7, 4);
+            var desktopPerColumn = (desktopNarrow - 6 * TimetableLayout.ColumnGap) / 7 / 4;
+            Assert(desktopPerColumn >= TimetableLayout.MinColumnWidth - 0.01,
+                $"桌面分 4 栏后每栏应不小于 {TimetableLayout.MinColumnWidth}px，实际 {desktopPerColumn:0.#}");
+
+            // 移动紧凑：320dp 下七列单栏应正好铺满，不再依赖横向滚动。
+            // 320 - 2*8 外边距 - 38 刻度列 - 4 刻度间距 = 262 可用宽度。
+            var compactFit = TimetableLayout.RequiredDaysWidth(
+                262, 7, 1,
+                TimetableViewModels.CompactMinDayWidth,
+                TimetableViewModels.CompactMinColumnWidth);
+            Assert(Math.Abs(compactFit - 262) < 1,
+                $"紧凑七列单栏应铺满 262，实际 {compactFit}");
+
+            var compactConflict = TimetableLayout.RequiredDaysWidth(
+                262, 7, 2,
+                TimetableViewModels.CompactMinDayWidth,
+                TimetableViewModels.CompactMinColumnWidth);
+            Assert(compactConflict > 262, "紧凑模式有分栏冲突时应按最小栏宽撑宽，而不是压窄每一栏");
+            var compactPerColumn = (compactConflict - 6 * TimetableLayout.ColumnGap) / 7 / 2;
+            Assert(compactPerColumn >= TimetableViewModels.CompactMinColumnWidth - 0.01,
+                $"紧凑分 2 栏后每栏应不小于 {TimetableViewModels.CompactMinColumnWidth}px，实际 {compactPerColumn:0.#}");
+
+            // ViewModel 只扣一次 VisiblePeriodColumnWidth：用能区分重复扣减的宽度。
+            var compactVm = new TimetableViewModels { CompactMode = true, GridWidth = 340 };
+            compactVm.Rebuild([], 1, null, Timetable.CreateDefaultPeriods(), darkTheme: false);
+            Assert(Math.Abs(compactVm.VisiblePeriodColumnWidth - TimetableViewModels.CompactPeriodColumnWidth) < 0.01,
+                $"紧凑刻度列应为 {TimetableViewModels.CompactPeriodColumnWidth}，实际 {compactVm.VisiblePeriodColumnWidth}");
+            Assert(Math.Abs(compactVm.DaysWidth - 302) < 1,
+                $"紧凑模式 GridWidth=340 时应只扣一次 38，DaysWidth 应为 302，实际 {compactVm.DaysWidth}");
+            Assert(Math.Abs(compactVm.DaysWidth + compactVm.VisiblePeriodColumnWidth - compactVm.GridWidth) < 0.01,
+                "DaysWidth + VisiblePeriodColumnWidth 必须等于 GridWidth（不能重复扣宽）");
+
+            var desktopVm = new TimetableViewModels { GridWidth = 1200 };
+            desktopVm.Rebuild([], 1, null, Timetable.CreateDefaultPeriods(), darkTheme: false);
+            Assert(Math.Abs(desktopVm.VisiblePeriodColumnWidth - TimetableViewModels.PeriodColumnWidth) < 0.01,
+                $"桌面刻度列应保持 {TimetableViewModels.PeriodColumnWidth}，实际 {desktopVm.VisiblePeriodColumnWidth}");
+            Assert(Math.Abs(desktopVm.DaysWidth - 1132) < 1,
+                $"桌面 GridWidth=1200 时应只扣一次 68，DaysWidth 应为 1132，实际 {desktopVm.DaysWidth}");
+            Assert(Math.Abs(desktopVm.DaysWidth + desktopVm.VisiblePeriodColumnWidth - desktopVm.GridWidth) < 0.01,
+                "桌面 DaysWidth + VisiblePeriodColumnWidth 必须等于 GridWidth");
+        });
+
         Check("课表：课程配色稳定且不串色", () =>
         {
             // 同一门课必须永远同色（含跨次运行）：这里断言的是「同输入同输出」，
@@ -2239,23 +2833,42 @@ public static class JsonSelfTest
             Assert(ReminderRules.Evaluate([longPassed], now, 60, none, none, now.AddMinutes(-90)).Count == 0,
                 "超过 30 分钟的错过不应补发");
 
-            // 显式提醒覆盖默认截止提醒
-            var manual = new TodoItem
+            // 显式提醒与截止提醒共用补发窗口；首次检查只发正好到点的提醒。
+            TodoItem Explicit(string id, double minutes) => new()
             {
-                Id = "man-1", Kind = TodoKind.Custom, Title = "打印", DueAt = now.AddMinutes(30),
-                RemindAt = now.AddMinutes(-1),
+                Id = id, Kind = TodoKind.Custom, Title = id, RemindAt = now.AddMinutes(minutes),
             };
+            var manual = Explicit("man-1", 0);
+            manual.DueAt = now.AddMinutes(30);
             var explicitHits = ReminderRules.Evaluate([manual], now, 60, none, none, null);
             Assert(explicitHits.Count == 1 && explicitHits[0].Kind == ReminderKind.Explicit,
-                $"显式提醒应覆盖默认截止提醒，实际 {explicitHits.Count} 条");
+                "当期显式提醒应覆盖默认截止提醒");
             var explicitKey = ReminderRules.ExplicitKey(manual, manual.RemindAt!.Value);
             Assert(ReminderRules.Evaluate([manual], now, 60, none, new HashSet<string> { explicitKey }, null).Count == 0,
                 "显式提醒发过不应重复");
+            Assert(ReminderRules.Evaluate([Explicit("man-future", 1)], now, 60, none, none, null).Count == 0,
+                "未来显式提醒不应提前发送");
 
-            // 关闭临近截止（提前量 0）不应连带关掉显式提醒
-            var off = ReminderRules.Evaluate([manual], now, 0, none, none, null);
-            Assert(off.Count == 1 && off[0].Kind == ReminderKind.Explicit,
+            var historical = Explicit("man-history", -1);
+            Assert(ReminderRules.Evaluate([historical], now, 60, none, none, null).Count == 0,
+                "首次启动不应补发历史显式提醒");
+            var lastCheck = now.AddMinutes(-40);
+            Assert(ReminderRules.Evaluate([historical], now, 60, none, none, lastCheck).Count == 1,
+                "非首次检查应补发 30 分钟内的显式提醒");
+            Assert(ReminderRules.Evaluate([Explicit("man-29", -29)], now, 60, none, none, lastCheck).Count == 1,
+                "过期 29 分钟的显式提醒应命中");
+            Assert(ReminderRules.Evaluate([Explicit("man-30", -30)], now, 60, none, none, lastCheck).Count == 1,
+                "过期 30 分钟的显式提醒应命中（含边界）");
+            Assert(ReminderRules.Evaluate([Explicit("man-31", -31)], now, 60, none, none, lastCheck).Count == 0,
+                "过期 31 分钟的显式提醒不应命中");
+            Assert(ReminderRules.Evaluate([historical], now, 60, none, none, now).Count == 0,
+                "上次检查之后已过去的显式提醒不应重复补发");
+
+            // 关闭临近截止（提前量 0）不应连带关掉显式提醒。
+            Assert(ReminderRules.Evaluate([manual], now, 0, none, none, null).Count == 1,
                 "关闭临近截止不应连带关掉显式提醒");
+            Assert(ReminderRules.Evaluate([historical], now, 0, none, none, lastCheck).Count == 1,
+                "关闭临近截止后，窗口内的过期显式提醒仍应命中");
 
             // 已完成 / 公告不参与提醒
             var done = new TodoItem
@@ -2371,6 +2984,56 @@ public static class JsonSelfTest
             }
         });
 
+        Check("数据备份：非法输入与写入失败不损坏现有数据", () =>
+        {
+            var dataDir = Path.Combine(Path.GetTempPath(), "hw-backup-bad-" + Guid.NewGuid().ToString("N"));
+            var duplicateZip = Path.Combine(Path.GetTempPath(), "hw-backup-dup-" + Guid.NewGuid().ToString("N") + ".zip");
+            var corruptZip = Path.Combine(Path.GetTempPath(), "hw-backup-corrupt-" + Guid.NewGuid().ToString("N") + ".zip");
+            var settings = Path.Combine(dataDir, "settings.json");
+            try
+            {
+                Directory.CreateDirectory(dataDir);
+                File.WriteAllText(settings, "original");
+
+                using (var zip = ZipFile.Open(duplicateZip, ZipArchiveMode.Create))
+                {
+                    using (var writer = new StreamWriter(zip.CreateEntry("settings.json").Open()))
+                        writer.Write("changed");
+                    using (var writer = new StreamWriter(zip.CreateEntry("SETTINGS.JSON").Open()))
+                        writer.Write("duplicate");
+                }
+
+                AssertThrows<IOException>(() => DataBackupService.RestoreBackup(duplicateZip, dataDir),
+                    "大小写不同的重复条目必须拒绝");
+                Assert(File.ReadAllText(settings) == "original", "重复条目预校验失败不得改动目标");
+
+                File.WriteAllText(corruptZip, "not a zip");
+                AssertThrows<IOException>(() => DataBackupService.RestoreBackup(corruptZip, dataDir),
+                    "损坏 zip 必须拒绝");
+                Assert(File.ReadAllText(settings) == "original", "损坏 zip 不得改动目标");
+
+                File.Delete(duplicateZip);
+                using (var zip = ZipFile.Open(duplicateZip, ZipArchiveMode.Create))
+                {
+                    using (var writer = new StreamWriter(zip.CreateEntry("settings.json").Open()))
+                        writer.Write("changed");
+                    using (var writer = new StreamWriter(zip.CreateEntry("manual-todos.json").Open()))
+                        writer.Write("new");
+                }
+                Directory.CreateDirectory(Path.Combine(dataDir, "manual-todos.json"));
+                AssertThrows<IOException>(() => DataBackupService.RestoreBackup(duplicateZip, dataDir),
+                    "目标路径不可写为文件时必须失败");
+                Assert(File.ReadAllText(settings) == "original",
+                    "第二个文件写入失败后，第一个文件必须回滚");
+            }
+            finally
+            {
+                try { Directory.Delete(dataDir, recursive: true); } catch { }
+                try { File.Delete(duplicateZip); } catch { }
+                try { File.Delete(corruptZip); } catch { }
+            }
+        });
+
         Check("截止提醒服务：发送 / 去重 / 重启后不重复", () =>
         {
             var dir = Path.Combine(Path.GetTempPath(), "hw-reminder-" + Guid.NewGuid().ToString("N"));
@@ -2482,6 +3145,50 @@ public static class JsonSelfTest
                 "汇总时刻校验不符");
         });
 
+        Check("平台作业：按截止时间的 3/5/7 天边界自动划分优先级", () =>
+        {
+            var now = new DateTimeOffset(2026, 11, 4, 12, 0, 0, TimeSpan.FromHours(8));
+            TodoItem Homework(TimeSpan? remaining) => new()
+            {
+                Id = "hw-priority-test",
+                Kind = TodoKind.Homework,
+                Title = "优先级测试",
+                DueAt = remaining is { } left ? now + left : null,
+            };
+
+            Assert(Homework(TimeSpan.FromDays(-1)).GetEffectivePriority(now) == TodoPriority.Urgent,
+                "逾期作业应归入 3 天内");
+            Assert(Homework(TimeSpan.FromDays(3)).GetEffectivePriority(now) == TodoPriority.Urgent,
+                "刚好 3 天应归入 3 天内");
+            Assert(Homework(TimeSpan.FromDays(3) + TimeSpan.FromTicks(1)).GetEffectivePriority(now) == TodoPriority.High,
+                "超过 3 天应进入 3–5 天");
+            Assert(Homework(TimeSpan.FromDays(5)).GetEffectivePriority(now) == TodoPriority.High,
+                "刚好 5 天应归入 3–5 天");
+            Assert(Homework(TimeSpan.FromDays(5) + TimeSpan.FromTicks(1)).GetEffectivePriority(now) == TodoPriority.Normal,
+                "超过 5 天应进入 5–7 天");
+            Assert(Homework(TimeSpan.FromDays(7)).GetEffectivePriority(now) == TodoPriority.Normal,
+                "刚好 7 天应归入 5–7 天");
+            Assert(Homework(TimeSpan.FromDays(7) + TimeSpan.FromTicks(1)).GetEffectivePriority(now) == TodoPriority.Low,
+                "超过 7 天应归入 7 天以上");
+            Assert(Homework(null).GetEffectivePriority(now) == TodoPriority.Normal,
+                "无截止时间的平台作业应保持普通");
+            Assert(Homework(TimeSpan.FromDays(2)).Priority == TodoPriority.Normal,
+                "自动优先级不得改写持久化的手动优先级字段");
+
+            var manual = new TodoItem
+            {
+                Id = "man-priority-test",
+                Kind = TodoKind.Custom,
+                Title = "自建事项",
+                DueAt = now.AddDays(1),
+                Priority = TodoPriority.Low,
+            };
+            Assert(manual.GetEffectivePriority(now) == TodoPriority.Low,
+                "自建事项应保持手动优先级");
+            Assert((int)TodoPriority.Low == 0 && (int)TodoPriority.Normal == 1 && (int)TodoPriority.High == 2,
+                "新增自动等级不得改变既有 JSON 枚举数值");
+        });
+
         Check("列表分组/排序设置：默认值与归一化", () =>
         {
             var defaults = new AppSettings();
@@ -2490,6 +3197,54 @@ public static class JsonSelfTest
             Assert(AppSettings.NormalizeListGroupMode(-1) == 0, "分组索引下界应夹到 0");
             Assert(AppSettings.NormalizeListGroupMode(9) == 2, "分组索引上界应夹到 2");
             Assert(AppSettings.NormalizeListSortMode(9) == 1, "排序索引上界应夹到 1");
+        });
+
+        Check("导航：学习通网课保留 course Key", () =>
+        {
+            var vm = new MainViewModel();
+            var nav = vm.NavItems.Single(n => n.Key == "course");
+            Assert(nav.Label == "学习通网课", $"课程导航名称应为「学习通网课」，实际「{nav.Label}」");
+            Assert(vm.NavItems.Count(n => n.Label == "学习通网课") == 1,
+                "「学习通网课」导航不应重复");
+
+            vm.SelectedNav = nav;
+            vm.OnNavChanged();
+            Assert(vm.ListTitle == "学习通网课",
+                $"列表标题应跟随导航显示「学习通网课」，实际「{vm.ListTitle}」");
+        });
+
+        Check("待办时间选择：空值、秒毫秒归零、下一个 30 分钟刻度", () =>
+        {
+            var disabled = DateTimeSelection.Compose(
+                "截止时间", false, new DateTime(2026, 10, 27), new TimeSpan(18, 0, 0), out var disabledError);
+            Assert(disabled is null && disabledError is null,
+                "未启用时应返回 null 且不报错");
+
+            var combined = DateTimeSelection.Compose(
+                "截止时间", true, new DateTime(2026, 10, 27), new TimeSpan(0, 18, 5, 42, 999), out var combineError);
+            Assert(combined is not null && combineError is null,
+                "启用且日期时间齐全时应返回有效值");
+            var expectedLocal = new DateTime(2026, 10, 27, 18, 5, 0);
+            Assert(combined!.Value.LocalDateTime == expectedLocal,
+                $"秒/毫秒应归零，实际 {combined.Value.LocalDateTime:O}");
+            Assert(combined.Value.Offset == TimeZoneInfo.Local.GetUtcOffset(expectedLocal),
+                "应使用本地时区偏移");
+
+            var noDate = DateTimeSelection.Compose(
+                "截止时间", true, null, new TimeSpan(18, 0, 0), out var dateError);
+            Assert(noDate is null && dateError?.Contains("日期", StringComparison.Ordinal) == true,
+                "启用但未选日期时应报日期错误");
+            var noTime = DateTimeSelection.Compose(
+                "截止时间", true, new DateTime(2026, 10, 27), null, out var timeError);
+            Assert(noTime is null && timeError?.Contains("时间", StringComparison.Ordinal) == true,
+                "启用但未选时间时应报时间错误");
+
+            Assert(DateTimeSelection.NextHalfHour(new DateTime(2026, 10, 27, 10, 5, 0))
+                   == new DateTime(2026, 10, 27, 10, 30, 0), "10:05 应取当天 10:30");
+            Assert(DateTimeSelection.NextHalfHour(new DateTime(2026, 10, 27, 10, 30, 0))
+                   == new DateTime(2026, 10, 27, 11, 0, 0), "10:30 应取当天下一个刻度 11:00");
+            Assert(DateTimeSelection.NextHalfHour(new DateTime(2026, 10, 27, 23, 45, 0))
+                   == new DateTime(2026, 10, 28, 0, 0, 0), "23:45 的下一个刻度应是次日 00:00");
         });
 
         Check("上课提醒：前提提示（有课表就不能说「还没有课表」）", () =>
@@ -2651,6 +3406,22 @@ public static class JsonSelfTest
             Assert(third.First(i => i.Name == "高等数学").Id == mathId, "更新应沿用原 Id");
             Assert(third.Count == 2, "更新不应改变条目总数");
 
+            // 匹配键含学期：跨学期重复导入新增记录，不能改写旧学期。
+            var (crossTerm, crossTermResult) = ScheduleMerge.Merge(third, Incoming(), 2);
+            Assert(crossTermResult.Added == 1 && crossTerm.Count == 3
+                   && crossTerm.Count(i => i.Name == "高等数学" && i.Term == 1) == 1
+                   && crossTerm.Count(i => i.Name == "高等数学" && i.Term == 2) == 1,
+                "跨学期同课程必须并存且保留旧学期");
+
+            // 匹配键含单双周：同课程、同时间的每周与单周安排是两条记录。
+            var oddWeek = Incoming();
+            oddWeek[0].WeekParity = WeekParity.Odd;
+            var (parity, parityResult) = ScheduleMerge.Merge(third, oddWeek, 1);
+            Assert(parityResult.Added == 1 && parity.Count == 3
+                   && parity.Any(i => i.Name == "高等数学" && i.WeekParity == WeekParity.Every)
+                   && parity.Any(i => i.Name == "高等数学" && i.WeekParity == WeekParity.Odd),
+                "同课程的单双周安排必须并存");
+
             // 匹配键含周次：同一门课不同周次段是两条独立记录
             var twoSegments = new List<ScheduleItem>
             {
@@ -2687,6 +3458,19 @@ public static class JsonSelfTest
     private static void Assert(bool condition, string message)
     {
         if (!condition) throw new InvalidOperationException(message);
+    }
+
+    private static void AssertThrows<T>(Action action, string message) where T : Exception
+    {
+        try { action(); }
+        catch (T) { return; }
+        throw new InvalidOperationException(message);
+    }
+
+    /// <summary>记录 OpenUrl 调用的平台实现，供课程直达测试断言。</summary>
+    private sealed class RecordingPlatformServices(List<string> opened) : IPlatformServices
+    {
+        public void OpenUrl(string url) => opened.Add(url);
     }
 
     /// <summary>是否形如 <c>#RRGGBB</c>（课程配色会被视图直接当画刷用，格式必须合法）。</summary>
@@ -2768,6 +3552,24 @@ public static class JsonSelfTest
                 .Replace("$TITLE$", title)
                 .Replace("$LEAF$", leafId.ToString(CultureInfo.InvariantCulture)),
             AppJsonContext.Default.YktActivity)!;
+
+    /// <summary>
+    /// type=9（公告）的日志条。<paramref name="coursewareId"/> 才是公告详情页使用的
+    /// notice id，日志自身的 <paramref name="id"/> 不是。
+    /// </summary>
+    private static YktActivity AnnActivity(long id, string title, bool hasRead, string? coursewareId = null)
+    {
+        var courseware = coursewareId is null
+            ? string.Empty
+            : $",\"courseware_id\":\"{coursewareId}\"";
+        return JsonSerializer.Deserialize(
+            """{"id":$ID$,"type":9,"title":"$TITLE$","create_time":"1758000000000","hasRead":$READ$$COURSEWARE$ }"""
+                .Replace("$ID$", id.ToString(CultureInfo.InvariantCulture))
+                .Replace("$TITLE$", title)
+                .Replace("$READ$", hasRead ? "true" : "false")
+                .Replace("$COURSEWARE$", courseware),
+            AppJsonContext.Default.YktActivity)!;
+    }
 
     private static TodoCacheFile CacheOf(SyncResult r) => new()
     {

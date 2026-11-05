@@ -59,13 +59,14 @@ public static class ChaoxingSyncService
     /// 现在一律请求：没有「待完成任务点」区块的课程自然得到 0，不需要靠猜。
     /// </para>
     /// <para>
-    /// 单课失败只跳过该课，不中断整次同步（与两个列表页的容错口径一致）。
+    /// 单课失败不中断整次同步；有旧缓存时保留该课上次的汇总，避免暂时失败被当成任务点清零。
     /// </para>
     /// </summary>
     public static async Task<(IReadOnlyList<ChaoxingCourse> Courses, IReadOnlyList<string> Warnings)>
         SyncCoursesAsync(
             string cookieHeader,
             IProgress<string>? progress = null,
+            IReadOnlyList<ChaoxingCourse>? previous = null,
             CancellationToken ct = default)
     {
         using var api = new ChaoxingApiClient(cookieHeader);
@@ -93,6 +94,26 @@ public static class ChaoxingSyncService
             catch (ChaoxingApiException ex)
             {
                 warnings.Add($"{c.CourseName}：任务点读取失败（{ex.Message}）");
+                var cached = previous?.FirstOrDefault(old =>
+                    old.CourseId == c.CourseId && old.ClazzId == c.ClazzId);
+                if (cached is not null)
+                {
+                    // 任务点暂时读不到时保留上次汇总；旧缓存缺 personId 的，
+                    // 顺手用本次课程列表补上，直达按钮不必再等一次成功同步。
+                    result.Add(cached.PersonId > 0
+                        ? cached
+                        : new ChaoxingCourse
+                        {
+                            CourseId = cached.CourseId,
+                            ClazzId = cached.ClazzId,
+                            PersonId = c.PersonId,
+                            CourseName = cached.CourseName,
+                            ClazzName = cached.ClazzName,
+                            IsRetired = cached.IsRetired,
+                            PendingTaskPoints = cached.PendingTaskPoints,
+                            Leaves = cached.Leaves,
+                        });
+                }
                 continue;
             }
 
@@ -100,6 +121,7 @@ public static class ChaoxingSyncService
             {
                 CourseId = c.CourseId,
                 ClazzId = c.ClazzId,
+                PersonId = c.PersonId,
                 CourseName = c.CourseName,
                 ClazzName = c.ClazzName,
                 IsRetired = c.IsRetired,
