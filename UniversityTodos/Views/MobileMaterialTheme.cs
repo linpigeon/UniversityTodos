@@ -1,7 +1,5 @@
-using System;
 using System.Linq;
 using Avalonia;
-using Avalonia.Markup.Xaml.Styling;
 using Avalonia.Themes.Fluent;
 using Material.Styles.Themes;
 using Material.Styles.Themes.Base;
@@ -25,8 +23,6 @@ namespace UniversityTodos.Views;
 /// </summary>
 public static class MobileMaterialTheme
 {
-    private const string MobileThemeUri = "avares://UniversityTodos/Styles/MobileTheme.axaml";
-
     public static void Apply(Application app)
     {
         var material = app.Styles.OfType<MaterialTheme>().FirstOrDefault();
@@ -55,14 +51,7 @@ public static class MobileMaterialTheme
         material.SecondaryColor = Material.Colors.SecondaryColor.Blue;
 
         // MobileTheme 只随本钩子加载：桌面端不会拿到卡片边距、底部导航等移动端样式。
-        if (!app.Styles.OfType<StyleInclude>().Any(s =>
-                string.Equals(s.Source?.ToString(), MobileThemeUri, StringComparison.Ordinal)))
-        {
-            var include = new StyleInclude(new Uri("avares://UniversityTodos/"))
-            {
-                Source = new Uri(MobileThemeUri),
-            };
-            app.Styles.Add(include);
-        }
+        if (!app.Styles.OfType<UniversityTodos.Styles.MobileTheme>().Any())
+            app.Styles.Add(new UniversityTodos.Styles.MobileTheme());
     }
 }

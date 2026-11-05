@@ -303,9 +303,7 @@ internal static class AndroidLayoutCheck
             var styles = Application.Current!.Styles;
             var materialCount = styles.Count(
                 s => s.GetType().FullName == "Material.Styles.Themes.MaterialTheme");
-            var mobileCount = styles.OfType<StyleInclude>().Count(s => string.Equals(
-                s.Source?.ToString(), "avares://UniversityTodos/Styles/MobileTheme.axaml",
-                StringComparison.Ordinal));
+            var mobileCount = styles.OfType<UniversityTodos.Styles.MobileTheme>().Count();
             Check(materialCount == 1 && mobileCount == 1,
                 $"主题多次切换后未叠加样式：MaterialTheme={materialCount}，MobileTheme={mobileCount}");
         }
