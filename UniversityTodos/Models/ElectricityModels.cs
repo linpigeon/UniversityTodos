@@ -4,6 +4,13 @@ using System.Text.Json.Serialization;
 
 namespace UniversityTodos.Models;
 
+public sealed class ElectricityBindRoomRequest
+{
+    [JsonPropertyName("cmd")] public string Cmd { get; set; } = string.Empty;
+    [JsonPropertyName("account")] public string Account { get; set; } = string.Empty;
+    [JsonPropertyName("timestamp")] public string Timestamp { get; set; } = string.Empty;
+}
+
 public sealed class ElectricityRoom
 {
     public string RoomName { get; set; } = string.Empty;

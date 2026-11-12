@@ -297,6 +297,7 @@ signtool verify /pa /v publish\UniversityTodos-Setup-1.5.0.exe
 .\UniversityTodos.Desktop.exe --syncbench           # 三端同时在线获取，记录各端与总耗时（只读）
 .\UniversityTodos.Desktop.exe --installercheck      # 解析最新安装包（传目录则实际下载校验）
 .\UniversityTodos.Desktop.exe --toastcheck          # 通知链路自检
+.\UniversityTodos.Desktop.exe --electricitycheck    # 完美校园电费接口真实读取（只输出宿舍数量与余额）
 .\UniversityTodos.Desktop.exe --electricity-toastcheck  # 低电量真实通知自检
 .\UniversityTodos.Desktop.exe --watercheck          # 统一认证 + 最近水费账单读取（账号从环境变量读取）
 .\UniversityTodos.Desktop.exe --selfcheck-widget w.png  # 小组件渲染自检

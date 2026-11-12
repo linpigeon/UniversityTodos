@@ -206,6 +206,15 @@ public static class JsonSelfTest
                    && rooms[0].Use == 126.3
                    && rooms[0].StatusText == "正常",
                 "电费房间、数值或状态解析不符");
+            var payload = JsonSerializer.Serialize(new ElectricityBindRoomRequest
+            {
+                Cmd = "getbindroom", Account = "sample-account", Timestamp = "20261112170000000",
+            }, AppJsonContext.Default.ElectricityBindRoomRequest);
+            using var request = JsonDocument.Parse(payload);
+            Assert(request.RootElement.GetProperty("cmd").GetString() == "getbindroom"
+                   && request.RootElement.GetProperty("account").GetString() == "sample-account"
+                   && request.RootElement.GetProperty("timestamp").GetString() == "20261112170000000",
+                "裁剪版请求必须保留 cmd、account 和 timestamp 字段");
             Assert(ElectricityJsonParser.ParseRoomList("not-json") is null,
                 "非法响应应返回失败，不能伪造余额 0");
         });

@@ -19,6 +19,8 @@ public sealed class ElectricityApiClient : IElectricityApi
 {
     private const string Url = "https://xqh5.17wanxiao.com/smartWaterAndElectricityService/SWAEServlet";
 
+    public string? LastError { get; private set; }
+
     private static readonly Dictionary<string, string> InitialCookies = new()
     {
         { "acw_tc", "0a45645e17625760507803047ec74cd7857cf8506787198497f848f5ac54ba" },
@@ -29,12 +31,12 @@ public sealed class ElectricityApiClient : IElectricityApi
         string account, CancellationToken ct = default)
     {
         using var httpClient = CreateHttpClient();
-        var paramJson = JsonSerializer.Serialize(new
+        var paramJson = JsonSerializer.Serialize(new ElectricityBindRoomRequest
         {
-            cmd = "getbindroom",
-            account,
-            timestamp = DateTime.Now.ToString("yyyyMMddHHmmssfff")
-        });
+            Cmd = "getbindroom",
+            Account = account,
+            Timestamp = DateTime.Now.ToString("yyyyMMddHHmmssfff")
+        }, AppJsonContext.Default.ElectricityBindRoomRequest);
         var formData = new Dictionary<string, string>
         {
             { "param", paramJson },
@@ -43,11 +45,24 @@ public sealed class ElectricityApiClient : IElectricityApi
             { "command", "JBSWaterElecService" }
         };
 
+        LastError = null;
         using var content = new FormUrlEncodedContent(formData);
         using var response = await httpClient.PostAsync(Url, content, ct).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode) return null;
         var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-        return ElectricityJsonParser.ParseRoomList(body);
+        if (!response.IsSuccessStatusCode)
+        {
+            LastError = $"HTTP {(int)response.StatusCode} {response.StatusCode}：{Preview(body)}";
+            return null;
+        }
+        var rooms = ElectricityJsonParser.ParseRoomList(body);
+        if (rooms is null) LastError = $"接口响应无法解析：{Preview(body)}";
+        return rooms;
+    }
+
+    private static string Preview(string body)
+    {
+        var text = body.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return text.Length <= 240 ? text : text[..240] + "…";
     }
 
     private static HttpClient CreateHttpClient()

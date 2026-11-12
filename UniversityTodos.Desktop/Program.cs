@@ -144,6 +144,9 @@ sealed class Program
             return;
         }
 
+        if (args.Contains("--electricitycheck"))
+            Environment.Exit(ElectricityCheck.RunAsync().GetAwaiter().GetResult());
+
         if (args.Contains("--electricity-toastcheck"))
             Environment.Exit(ToastCheck.RunElectricity());
 

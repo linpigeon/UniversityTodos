@@ -101,7 +101,9 @@ public sealed partial class ElectricityViewModel : ViewModelBase
             var rooms = await _api.GetBoundRoomsAsync(account, ct).ConfigureAwait(true);
             if (rooms is null)
             {
-                StatusMessage = "电费查询失败，已保留上次数据，请稍后重试";
+                StatusMessage = _api is ElectricityApiClient { LastError: { } reason }
+                    ? $"电费查询失败：{reason}，已保留上次数据"
+                    : "电费查询失败，已保留上次数据，请稍后重试";
                 return false;
             }
             if (rooms.Count == 0)

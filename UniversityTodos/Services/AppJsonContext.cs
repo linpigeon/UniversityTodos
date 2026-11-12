@@ -60,6 +60,7 @@ namespace UniversityTodos.Services;
 [JsonSerializable(typeof(ReminderState))]
 [JsonSerializable(typeof(ElectricityCacheFile))]
 [JsonSerializable(typeof(ElectricityReminderState))]
+[JsonSerializable(typeof(ElectricityBindRoomRequest))]
 [JsonSerializable(typeof(List<ElectricityRoom>))]
 [JsonSerializable(typeof(WaterCacheFile))]
 [JsonSerializable(typeof(List<WaterBill>))]
