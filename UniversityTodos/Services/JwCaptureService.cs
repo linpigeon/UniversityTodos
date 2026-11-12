@@ -87,6 +87,9 @@ public sealed class PageReadyGate
         _lastLoggedReady = true;
     }
 
+    /// <summary>是否已经至少完成一次导航；登录流程用它禁止首轮加载前的所有脚本调用。</summary>
+    public bool HasCompletedNavigation => _navigationCompleted;
+
     /// <summary>当前是否允许执行脚本。</summary>
     public bool IsReady =>
         _navigationCompleted || (_sawAdapter && _sinceAdapterCreated.Elapsed > AdapterOnlyGrace);
@@ -142,8 +145,8 @@ public sealed class PageReadyGate
 /// <summary>
 /// 教务系统课表导入：在教务页注入「一键获取课表」悬浮球，用户登录并导航到课表页后点它抓取当前页。
 /// <para>
-/// <b>不代填表单、不代提交、不注入凭据</b>——用户全程在自己的学校系统里操作，
-/// 本工具只读取他已经打开的那个页面（与「浏览器插件抓取当前页」是同一性质）。
+/// 用户可以在账号页选择加密保存凭据并一键登录；登录态优先复用学校 WebView 会话。
+/// 抓取阶段只读取已打开的页面（与「浏览器插件抓取当前页」是同一性质），不提交课表或修改远端数据。
 /// </para>
 /// <para>
 /// <b>与旧项目（Electron）的关键差异</b>：那边 <c>executeJavaScript</c> 会 await Promise，
@@ -265,6 +268,19 @@ public static class JwCaptureService
     private static string JsonStr(string value) =>
         System.Text.Json.JsonSerializer.Serialize(value);
 
+    internal static string BuildCredentialLoginScript(string account, string password) =>
+        "(()=>{" +
+        "var p=document.querySelector('input[type=password]');if(!p)return '';" +
+        "var f=p.form||document;" +
+        "var a=f.querySelector('input[placeholder=\"请输入学工号\"],input[name*=user i],input[name*=account i],input[name*=login i],input[type=text],input[type=number]');" +
+        "if(!a)return '';" +
+        $"a.value={JsonStr(account)};p.value={JsonStr(password)};" +
+        "a.dispatchEvent(new Event('input',{bubbles:true}));p.dispatchEvent(new Event('input',{bubbles:true}));" +
+        "a.dispatchEvent(new Event('change',{bubbles:true}));p.dispatchEvent(new Event('change',{bubbles:true}));" +
+        "var b=f.querySelector('button[type=submit],input[type=submit]');" +
+        "if(!b){var candidates=Array.from(f.querySelectorAll('button,input[type=button]'));b=candidates.find(x=>((x.textContent||x.value||'').includes('登录')));}" +
+        "if(!b)return '';b.click();return 'submitted';})()";
+
     /// <summary>在 UI 线程上执行一段脚本并取回字符串结果；超时或异常返回 null（内嵌 WebView）。</summary>
     public static Task<string?> TryEvalAsync(NativeWebView webView, string script, CancellationToken ct = default) =>
         TryEvalCoreAsync(() => webView.InvokeScript(script), ct);
@@ -299,8 +315,9 @@ public static class JwCaptureService
             var finished = await Task.WhenAny(task, timeout).ConfigureAwait(true);
             if (!ReferenceEquals(finished, task))
             {
-                // 超时：连异常都要观察掉，再返回 null。
+                // 超时或取消：脚本与延时任务都要观察，再返回 null。
                 _ = task.ContinueWith(static t => _ = t.Exception, TaskScheduler.Default);
+                timeout.Observe();
                 Log($"eval: 超时（{ScriptTimeout.TotalSeconds:0.#}s 未返回）");
                 return null;
             }

@@ -11,6 +11,9 @@ public partial class ChaoxingLoginView : UserControl
 {
     private bool _webViewReady;
     private bool _navigated;
+    private bool _credentialSubmitted;
+    private System.Threading.CancellationTokenSource? _silentCts;
+    private readonly PageReadyGate _pageGate = new();
 
     public ChaoxingLoginView()
     {
@@ -19,12 +22,64 @@ public partial class ChaoxingLoginView : UserControl
         ChaoxingWebView.AdapterCreated += (_, _) =>
         {
             _webViewReady = true;
+            _pageGate.MarkAdapterCreated();
             WebViewPlaceholder.IsVisible = false;
             ChaoxingWebView.IsVisible = true;
             NavigateIfNeeded();
         };
-        ChaoxingWebView.AdapterDestroyed += (_, _) => _webViewReady = false;
-        ChaoxingWebView.NavigationCompleted += async (_, _) => await TryCaptureAsync();
+        ChaoxingWebView.AdapterDestroyed += (_, _) =>
+        {
+            _webViewReady = false;
+            _pageGate.Reset();
+        };
+        ChaoxingWebView.NavigationStarted += (_, _) => _pageGate.MarkNavigating();
+        ChaoxingWebView.NavigationCompleted += async (_, _) =>
+        {
+            _pageGate.MarkReady();
+            await TryAutoLoginAsync();
+            await TryCaptureAsync();
+        };
+    }
+
+    private async System.Threading.Tasks.Task TryAutoLoginAsync()
+    {
+        if (!_pageGate.HasCompletedNavigation) return;
+        if (_credentialSubmitted || Vm?.ChaoxingCredential.HasCredential != true) return;
+        _credentialSubmitted = true;
+        if (Vm is { } vm)
+        {
+            var result = await JwCaptureService.TryEvalAsync(
+                ChaoxingWebView,
+                JwCaptureService.BuildCredentialLoginScript(
+                    vm.ChaoxingCredential.AccountInput, vm.ChaoxingCredential.PasswordInput));
+            if (vm.LoginBackground && result?.Trim().Trim('"') != "submitted")
+                vm.ShowManualLogin("chaoxing", "无法后台提交账密，请在当前页面手动登录…");
+        }
+    }
+
+    private void StartSilentFallback()
+    {
+        StopSilentFallback();
+        if (Vm?.LoginBackground != true) return;
+        _silentCts = new System.Threading.CancellationTokenSource();
+        _ = WatchSilentLoginAsync(_silentCts.Token);
+    }
+
+    private async System.Threading.Tasks.Task WatchSilentLoginAsync(System.Threading.CancellationToken ct)
+    {
+        try { await System.Threading.Tasks.Task.Delay(TimeSpan.FromSeconds(45), ct); }
+        catch (System.OperationCanceledException) { return; }
+        if (!ct.IsCancellationRequested && Vm is { LoginBackground: true, ChaoxingLoginOpen: true } vm)
+            vm.ShowManualLogin("chaoxing", "静默登录未完成，请处理验证或在当前页面手动登录…");
+    }
+
+    private void StopSilentFallback()
+    {
+        var cts = _silentCts;
+        _silentCts = null;
+        if (cts is null) return;
+        try { cts.Cancel(); } catch (System.ObjectDisposedException) { }
+        cts.Dispose();
     }
 
     private MainViewModel? Vm => DataContext as MainViewModel;
@@ -48,23 +103,34 @@ public partial class ChaoxingLoginView : UserControl
     protected override void OnDetachedFromVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
     {
         base.OnDetachedFromVisualTree(e);
+        StopSilentFallback();
         if (Vm is { } vm) vm.PropertyChanged -= OnVmPropertyChanged;
     }
 
     private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(MainViewModel.LoginBackground))
+        {
+            if (Vm?.LoginBackground == false)
+            {
+                ChaoxingWebView.InvalidateMeasure();
+                ChaoxingWebView.InvalidateArrange();
+            }
+            return;
+        }
         if (e.PropertyName != nameof(MainViewModel.LoginPageOpen)) return;
-        if (Vm is not { ChaoxingLoginOpen: true }) return;
+        if (Vm is not { ChaoxingLoginOpen: true })
+        {
+            StopSilentFallback();
+            return;
+        }
 
-        // 覆盖层重新打开时要重新导航。
-        // _navigated 原先是一次性标志，而本视图与主窗口同生命周期，导航只发生在
-        // AdapterCreated / 首次 OnAttachedToVisualTree —— 与用户是否打开覆盖层无关。
-        // 于是关掉再打开（退出登录后尤其明显）看到的是上一次残留的页面，
-        // 且不会再触发会话捕获。这里按「打开一次、导航一次」纠正。
         _navigated = false;
+        _credentialSubmitted = false;
         WebViewPlaceholder.IsVisible = !_webViewReady;
         ChaoxingWebView.IsVisible = _webViewReady;
         NavigateIfNeeded();
+        StartSilentFallback();
 
         // 让托管布局重跑一遍，把原生控件按最终边界重新定位（与 LoginView.ShowWebView 同理）。
         ChaoxingWebView.InvalidateMeasure();

@@ -107,28 +107,76 @@
           </Button>
         </Grid>
 
-        <!-- 今天的课（只在我的一天展示，来自课表展开） -->
-        <StackPanel Spacing="6" IsVisible="{Binding ShowTodayClasses}">
-          <TextBlock Text="今天的课" FontSize="12" FontWeight="SemiBold"
-                     Foreground="{DynamicResource TodoTextSecondary}" />
-          <ItemsControl ItemsSource="{Binding TodayClasses}">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate x:DataType="vm:ClassSessionViewModel">
-                <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,2">
-                  <TextBlock Grid.Column="0" Classes="meta" Text="{Binding TimeText}"
-                             VerticalAlignment="Center" />
-                  <TextBlock Grid.Column="1" Text="{Binding Name}" FontSize="13"
-                             Margin="10,0" TextTrimming="CharacterEllipsis"
-                             Foreground="{DynamicResource TodoTextPrimary}"
-                             VerticalAlignment="Center" />
-                  <TextBlock Grid.Column="2" Classes="faint" Text="{Binding Location}"
-                             IsVisible="{Binding HasLocation}" VerticalAlignment="Center" />
-                </Grid>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-          <Border Height="1" Background="{DynamicResource TodoBorder}" Margin="0,4,0,0" />
-        </StackPanel>
+        <!-- 今日课程与水电总览：共享视图 1/4 高度，左右两栏分别滚动。 -->
+        <Grid Name="TodayOverviewPanel" ColumnDefinitions="*,*"
+              IsVisible="{Binding ShowTodayClasses}">
+          <Grid Grid.Column="0" RowDefinitions="Auto,*,Auto" RowSpacing="4">
+            <TextBlock Grid.Row="0" Text="今日课程" FontSize="16" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TodoTextPrimary}" />
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+              <ItemsControl ItemsSource="{Binding TodayClasses}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:ClassSessionViewModel">
+                    <Grid ColumnDefinitions="52,*" Margin="0,2">
+                      <StackPanel Grid.Column="0" Spacing="1" VerticalAlignment="Top">
+                        <TextBlock Text="{Binding StartTimeText}" FontSize="16" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TodoAccent}" />
+                        <TextBlock Text="{Binding EndTimeText}" FontSize="11"
+                                   Foreground="{DynamicResource TodoTextSecondary}" />
+                      </StackPanel>
+                      <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Top">
+                        <TextBlock Text="{Binding Name}" FontSize="14" FontWeight="SemiBold"
+                                   TextWrapping="Wrap" Foreground="{DynamicResource TodoTextPrimary}" />
+                        <TextBlock Text="{Binding Location}" FontSize="11" TextWrapping="Wrap"
+                                   IsVisible="{Binding HasLocation}"
+                                   Foreground="{DynamicResource TodoTextSecondary}" />
+                      </StackPanel>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+            <Border Grid.Row="2" Height="1" Background="{DynamicResource TodoBorder}" />
+          </Grid>
+
+          <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="4" Margin="12,0,0,0">
+            <TextBlock Grid.Row="0" Text="水电总览" FontSize="16" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TodoTextPrimary}" />
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+              <StackPanel Spacing="10">
+                <StackPanel Spacing="2">
+                  <TextBlock Text="电费" FontSize="12" FontWeight="SemiBold"
+                             Foreground="{DynamicResource TodoTextSecondary}" />
+                  <TextBlock Text="{Binding Electricity.SelectedRoomOddText, StringFormat='{}{0} 度'}"
+                             FontSize="16" FontWeight="SemiBold"
+                             Foreground="{DynamicResource TodoAccent}" />
+                  <TextBlock Text="{Binding Electricity.SelectedRoomOverviewName}"
+                             FontSize="11" TextWrapping="Wrap"
+                             Foreground="{DynamicResource TodoTextSecondary}" />
+                </StackPanel>
+                <StackPanel Spacing="2">
+                  <TextBlock Text="水费 · 本学期" FontSize="12" FontWeight="SemiBold"
+                             Foreground="{DynamicResource TodoTextSecondary}" />
+                  <TextBlock Text="{Binding Water.TotalFee, StringFormat='{}¥ {0:F2}'}"
+                             FontSize="16" FontWeight="SemiBold"
+                             IsVisible="{Binding Water.HasData}"
+                             Foreground="{DynamicResource TodoAccent}" />
+                  <TextBlock Text="待查询" FontSize="16" FontWeight="SemiBold"
+                             IsVisible="{Binding !Water.HasData}"
+                             Foreground="{DynamicResource TodoAccent}" />
+                  <TextBlock Text="{Binding Water.TotalUsage, StringFormat='{}{0:F2} m³'}"
+                             FontSize="11" IsVisible="{Binding Water.HasData}"
+                             Foreground="{DynamicResource TodoTextSecondary}" />
+                  <TextBlock Text="暂无本学期水费" FontSize="11" TextWrapping="Wrap"
+                             IsVisible="{Binding !Water.HasData}"
+                             Foreground="{DynamicResource TodoTextSecondary}" />
+                </StackPanel>
+              </StackPanel>
+            </ScrollViewer>
+          </Grid>
+        </Grid>
         <!-- 数据版本高于程序：只读保护横幅（绝不覆盖新数据） -->
         <Border IsVisible="{Binding IsDataReadOnly}"
                 Background="{DynamicResource TodoWarningBackground}"
@@ -307,7 +355,7 @@
       <StackPanel Grid.Row="2" Classes="empty-state"
                   HorizontalAlignment="Center" VerticalAlignment="Center"
                   Margin="24"
-                  IsVisible="{Binding !List.HasAnyContent}">
+                  IsVisible="{Binding ShowEmptyState}">
         <Border Classes="empty-icon"
                 IsVisible="{Binding DrawerMode, RelativeSource={RelativeSource AncestorType=views:TodoListView}}">
           <TextBlock Classes="icon" Text="&#xF0AE;" />

@@ -30,7 +30,7 @@
 
 * **公告未读**：公告按已读/未读分组，支持单条已读与全部已读
 
-* **两种登录方式**：应用内嵌官方登录页微信扫码；没有 WebView2 的机器可改用粘贴 Cookie 登录
+* **多种登录方式**：雨课堂使用 WebView 手动扫码、账密或粘贴 Cookie；登录后自动捕获并加密保存会话
 
 * **Fluent 半透明界面**：亚克力磨砂背景，支持自定义壁纸与透明度滑块
 
@@ -48,6 +48,10 @@
 
 * **课表**：可从正方教务一键导入，也可手工增删改或从 CSV/TSV 模板导入；「我的一天」顶部显示今天的课
 
+* **考试与成绩**：复用教务登录状态读取考试安排、分学期成绩和专业执行计划；展示最低毕业学分、计划课程数、已获学分、加权平均绩点和百分制平均分，支持离线缓存
+
+* **宿舍水电费**：通过完美校园学号查询剩余电量与用量，支持低电量系统提醒；通过学校统一身份认证查询本学期及往期冷热水账单，均支持离线缓存
+
 * **数据备份**：设置 → 关于可导出/恢复数据 zip；数据版本高于程序时自动进入只读，避免降级覆盖
 
 * **桌面小组件**：仿滴答清单的桌面挂件，半透明玻璃面板、可拖动、可缩放，位置与尺寸自动记忆，浅色/深色跟随主程序
@@ -61,7 +65,7 @@
 - 自动创建**桌面快捷方式**与开始菜单项（含卸载入口），并写入「设置 → 应用」的卸载信息。
 - 安装版把**程序、数据、缓存**都收在安装目录下：
   - `<安装目录>\Data`：设置、登录态、待办缓存、自建待办、提醒状态、课表；
-  - `<安装目录>\Cache\WebView2`：登录页浏览器缓存；
+  - `<安装目录>\Cache\WebView2`：新安装的浏览器缓存；已有 `UniversityTodos.Desktop.exe.WebView2` 或旧版 `HomeworkReminder.Desktop.exe.WebView2` 时优先复用，保留教务等平台的登录状态；
   - `portable.flag`：安装模式标记。删掉它，应用会回到兼容模式
     （数据在 `%LOCALAPPDATA%\UniversityTodos`）。
 - 安装向导检测到旧版数据时可勾选「迁移旧数据」；卸载默认**保留** `Data`。
@@ -79,19 +83,31 @@
 
 在**设置 → 账号**里可以分别登录三个数据源：
 
-1. **雨课堂**——点「扫码登录 / 重新登录」，应用内嵌官方登录页，微信扫码即可；
-   缺少 WebView2 运行时时点「使用 Cookie 登录」，从浏览器 F12 → Network
-   复制任意 `v2/api/web` 请求的 `cookie` 请求头粘贴进去；
-2. **学习通（超星）**——点「登录学习通」，在内嵌登录页用账号密码 / 短信 / 邮箱登录，
-   登录成功自动捕获会话；
-3. **批改网（句酷）**——点「登录批改网」，在内嵌的批改网页面输入账号密码，
-   登录成功自动捕获会话，同步**未完成作文**为待办。
+1. **雨课堂**——点「扫码登录 / 重新登录」打开普通 WebView，手动选择扫码或雨课堂账密登录；
+   不提供微信一键授权或账密托管，缺少 WebView2 时也可粘贴 Cookie；
+2. **学习通（超星）**——保存账密后点「账密一键登录」，依次尝试直接 POST 和后台官方登录页；
+   需要验证码、双因素或扫码时切到前台，也可点「登录学习通」手动完成；
+3. **批改网（句酷）**——点「微信授权登录」打开官方 OAuth 页面并亲自确认，或保存账密后点「账密一键登录」；
+   需要绑定、人工验证或手动输入时直接在当前页面继续，登录成功自动同步**未完成作文**为待办。
 
 三者可以只登一个，也可以任意组合；待办列表会把各来源的作业合并显示。
 登录态失效时不会弹回登录页，而是列表顶部横幅提示，已缓存的列表继续可见。
 
-> 三个数据源都**只保存会话 Cookie**（Windows 下用 DPAPI 加密），
-> 不保存账号密码：登录一律在应用内嵌的官方页面里完成。
+> 三个数据源优先保存会话 Cookie（Windows 下用 DPAPI 加密）。
+> 学习通、批改网可单独选择加密保存账密用于一键登录；雨课堂只使用手动 WebView 登录，不保存账密。
+
+左侧栏的**考试**包含“考试信息”和“学分与成绩”两个二级页面。前者按学期展示考试卡片；后者按学期展示成绩，并统计专业最低毕业学分、计划课程数、已获学分、加权平均绩点与百分制平均分。考试信息只在点击「从教务获取」后于后台恢复会话并读取，页面保持不动，教务状态以页内横幅显示；成绩获取仍使用教务窗口。`exams.json` 与 `grades.json` 分别缓存，并在重启后恢复最后查询的学期（旧缓存首次打开时恢复最近的已有学期）。
+
+教务成功登录后，Windows 会把教务域的 `JSESSIONID` 与 `route` 用 DPAPI 加密保存到 `jw-session.json`，下次打开教务窗口前先恢复 Cookie。学校仍可使服务端会话过期，此时照常显示登录页，由用户手动登录；该文件不是永久登录保证，也不包含教务账密。
+
+侧栏的**水电费**是独立栏目，不需要登录上述平台：输入完美校园学号并保存，再点「刷新」即可查询。宽屏下电费与水费左右分栏，窄屏自动上下排列；「我的一天」也会并排显示今日课程和水电总览。
+页面可设置低电量阈值和系统通知；自动检查间隔沿用「自动同步」设置，查询失败时保留本地缓存。
+下方**宿舍水费**区域点「查询水费」后，Windows 才会等待 WebView Adapter 与 CookieManager 就绪，恢复 `water-session.json` 中加密保存的统一认证及水费站点 Cookie，再在后台读取账单；冷启动只恢复本地账单缓存，不自动查询或切换页面。统一认证状态在水电费页以横幅显示。只有会话失效或 45 秒未完成时，才在 设置 → 账号 显示同一认证页面，由用户手动登录。成功读取账单后会更新会话文件，清除统一认证凭据时也会清除它。
+账期按「学期第一周周一」划分，默认显示结束日期在该周一及之后的本学期冷热水用量、费用和合计，包括尚未到结束日的在途账期。开启「显示往期水费」后会逐页读取周一之前的历史账单并离线缓存，再次打开可直接查看；普通本学期查询不会清除历史缓存。账号区的「统一认证登录」也可直接打开认证页，无需先保存账密。
+
+**设置 → 账号**可分别保存统一身份认证、学习通和批改网凭据：Windows 使用 DPAPI、Android 使用 Keystore 加密。
+保存后可一键登录；网页会话尽量长期保留，失效时再使用加密凭据重新登录。也支持随时清除凭据。雨课堂和教务系统不保存或自动提交账密，只使用手动 WebView 登录。
+学习通支持 `fanyalogin` 静默 POST，批改网支持按站点 RSA 公钥加密后静默 POST；任何直接登录失败都会继续尝试后台官方登录页，45 秒仍未完成或无法提交时显示同一 WebView 转人工。批改网的微信授权直接显示官方页面，由用户亲自点击确认；Android 不启用账密后台登录。
 
 ## 自动同步与通知
 
@@ -121,6 +137,12 @@
 ```
 
 逐项报告：AUMID 注册 → 开始菜单快捷方式 → toast XML 生成与转义 → WinRT 投递（失败给 HRESULT）。
+
+电费提醒也有独立的真实通知自检（正常电量建基线后模拟跌破阈值，使用临时状态，不改实际配置）：
+
+```powershell
+.\UniversityTodos.Desktop.exe --electricity-toastcheck
+```
 
 > **实现说明**：未打包（unpackaged）的 Win32 应用发 toast 需要三个条件，缺一不可：
 > ① 注册 `HKCU\Software\Classes\AppUserModelId\<aumid>`；
@@ -159,12 +181,22 @@
 | `session.json` | 雨课堂登录态（DPAPI 加密） |
 | `chaoxing-session.json` | 学习通登录态 |
 | `pigai-session.json` | 批改网登录态（同样 DPAPI 加密） |
+| `jw-session.json` | 教务系统会话 Cookie（Windows DPAPI 加密，不含账密） |
 | `local-state.json` | 本地勾选 / 已读 / 星标 / 我的一天 |
 | `manual-todos.json` | 自建待办 |
 | `reminder-state.json` | 提醒去重状态 |
-| `settings.json` | 壁纸 / 透明度 / 主题 / 提醒等设置 |
+| `electricity.json` | 宿舍电费缓存 |
+| `electricity-reminder-state.json` | 低电量提醒基线与去重状态 |
+| `water.json` | 本学期与往期水费账单缓存 |
+| `water-session.json` | 统一认证与水费站点会话 Cookie（Windows DPAPI 加密） |
+| `water-credentials.json` | 统一身份认证凭据（同样加密，可随时清除） |
+| `chaoxing-credentials.json` | 学习通账密凭据（可选，加密保存） |
+| `pigai-credentials.json` | 批改网账密凭据（可选，加密保存） |
+| `settings.json` | 壁纸 / 透明度 / 主题 / 提醒 / 完美校园学号等设置 |
 | `todos.json` | 待办缓存（各来源的作业都在里面） |
 | `schedule.json` | 课表 |
+| `exams.json` | 分学期考试信息缓存 |
+| `grades.json` | 分学期成绩与学分统计缓存 |
 | `startup.log` | 启动日志 |
 
 数据目录可用环境变量 `UNIVERSITYTODOS_DATA_DIR` 覆盖（优先级最高）；
@@ -201,7 +233,7 @@
    （只复制 JSON，不要复制 `startup.log`、`.WebView2` 缓存）；
 4. 启动应用，按上面的方法核对「数据位置」。
 
-**换机 / 换 Windows 用户时**：`session.json`、`chaoxing-session.json`、`pigai-session.json`
+**换机 / 换 Windows 用户时**：`session.json`、`chaoxing-session.json`、`pigai-session.json`、`jw-session.json`、`water-session.json`
 是 DPAPI 密文，只能在同一台机器的同一 Windows 用户下解密；迁移后如果提示未登录，
 重新扫码/登录一次即可，其余待办与课表不受影响。
 
@@ -223,24 +255,24 @@
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
   /f D:\cert.pfx /p <密码> publish\trim\UniversityTodos.Desktop.exe
 
-.\tools\build-installer.ps1 -Version 1.4.7
+.\tools\build-installer.ps1 -Version 1.5.0
 
 # 2. 再签安装包
 signtool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
-  /f D:\cert.pfx /p <密码> publish\UniversityTodos-Setup-1.4.7.exe
+  /f D:\cert.pfx /p <密码> publish\UniversityTodos-Setup-1.5.0.exe
 
 # 3. 校验签名
-signtool verify /pa /v publish\UniversityTodos-Setup-1.4.7.exe
+signtool verify /pa /v publish\UniversityTodos-Setup-1.5.0.exe
 ```
 
 > 注意：签名只能证明「发布者身份」与「文件未被篡改」；**新证书仍需要积累 SmartScreen 声誉**。
 > EV 证书通常能更快建立信任，OV 证书在下载量积累前仍可能被提示。
 > 签完 exe 后要重新打 zip / 安装包，否则发布产物里的 exe 还是未签名的那一份。
-> `release.ps1` 默认会重新 publish；签名版要么复用已签好的 `publish\UniversityTodos-<tag>-win-x64\` 并用 `-SkipBuild`，要么把签名步骤接进脚本。当前 v1.4.7 发布包仍是未签名版本。
+> `release.ps1` 默认会重新 publish；签名版要么复用已签好的 `publish\UniversityTodos-<tag>-win-x64\` 并用 `-SkipBuild`，要么把签名步骤接进脚本。当前 v1.5.0 发布包仍是未签名版本。
 ## 打包发布
 
 ```powershell
-.\tools\publish.ps1 -Mode trim   -NoPdb   # 裁剪单文件：40.8 MB，双击即用（推荐分发）
+.\tools\publish.ps1 -Mode trim   -NoPdb   # 裁剪单文件：约 62 MB，双击即用（推荐分发）
 .\tools\publish.ps1 -Mode single -NoPdb   # 完整单文件：约 100 MB，兼容性最好
 .\tools\publish.ps1 -Mode fdd             # 框架依赖：体积最小，目标机需装 .NET 10 运行时
 .\tools\publish.ps1 -Mode sc              # 自包含多文件
@@ -254,10 +286,19 @@ signtool verify /pa /v publish\UniversityTodos-Setup-1.4.7.exe
 ```powershell
 .\UniversityTodos.Desktop.exe --selfcheck out.png   # 窗口/绑定自检 + 离屏渲染
 .\UniversityTodos.Desktop.exe --jsoncheck           # 序列化路径自检（裁剪版必过项）
+.\UniversityTodos.Desktop.exe --logingatecheck      # 公开登录页首轮加载与取消异常自检
+.\UniversityTodos.Desktop.exe --watersilentcheck   # 水费后台宿主导航自检（不使用凭据）
+.\UniversityTodos.Desktop.exe --watercoldcheck     # 冷启动统一认证与账单读取（使用已加密凭据）
+.\UniversityTodos.Desktop.exe --watersilentflowcheck # Adapter 初始化、后台认证与账单主流程自检
+.\UniversityTodos.Desktop.exe --examinfocheck      # 应用内教务 WebView 真实考试读取（仅输出数量）
+.\UniversityTodos.Desktop.exe --examflowcheck      # 登录 → 获取 → 返回考试列表主流程自检
+.\UniversityTodos.Desktop.exe --gradecreditcheck   # 成绩、全学年统计与专业执行计划自检
 .\UniversityTodos.Desktop.exe --synccheck           # 无窗口等待首次同步完成并检查结果
 .\UniversityTodos.Desktop.exe --syncbench           # 三端同时在线获取，记录各端与总耗时（只读）
 .\UniversityTodos.Desktop.exe --installercheck      # 解析最新安装包（传目录则实际下载校验）
 .\UniversityTodos.Desktop.exe --toastcheck          # 通知链路自检
+.\UniversityTodos.Desktop.exe --electricity-toastcheck  # 低电量真实通知自检
+.\UniversityTodos.Desktop.exe --watercheck          # 统一认证 + 最近水费账单读取（账号从环境变量读取）
 .\UniversityTodos.Desktop.exe --selfcheck-widget w.png  # 小组件渲染自检
 .\UniversityTodos.Desktop.exe --cxcheck             # 学习通课程任务点在线自检（只读）
 .\UniversityTodos.Desktop.exe --detailcheck         # 详情面板互斥回归（课程/待办不叠加）
@@ -289,20 +330,20 @@ signtool verify /pa /v publish\UniversityTodos-Setup-1.4.7.exe
 
 # 2. 打包（安装包依赖 publish\trim）
 .\tools\publish.ps1 -Mode trim -NoPdb
-.\tools\build-installer.ps1 -Version 1.4.7
+.\tools\build-installer.ps1 -Version 1.5.0
 
 # 3. 一键发布：校验版本一致性 → 打包 → 生成 update-manifest.json → 上传
 $env:GITHUB_TOKEN='<GitHub 令牌>'; $env:GITEA_TOKEN='<Gitea 令牌>'
-.\tools\release.ps1 -Tag v1.4.7 -Upload `
-  -Installer .\publish\UniversityTodos-Setup-1.4.7.exe `
+.\tools\release.ps1 -Tag v1.5.0 -Upload `
+  -Installer .\publish\UniversityTodos-Setup-1.5.0.exe `
   -AndroidApk .\UniversityTodos.Android\bin\Release\net10.0-android\com.CompanyName.UniversityTodos-Signed.apk
 
 # 只校验并打包、不上传
-.\tools\release.ps1 -Tag v1.4.7
+.\tools\release.ps1 -Tag v1.5.0
 
 # 产物已生成、只想重传（例如补权限后）
-.\tools\release.ps1 -Tag v1.4.7 -SkipBuild -Upload `
-  -Installer .\publish\UniversityTodos-Setup-1.4.7.exe `
+.\tools\release.ps1 -Tag v1.5.0 -SkipBuild -Upload `
+  -Installer .\publish\UniversityTodos-Setup-1.5.0.exe `
   -AndroidApk .\UniversityTodos.Android\bin\Release\net10.0-android\com.CompanyName.UniversityTodos-Signed.apk
 ```
 
@@ -407,9 +448,12 @@ UniversityTodos/                 共享项目：模型、服务、视图、ViewM
     ScheduleStore.cs              schedule.json 读写与逐条校验
     ScheduleMerge.cs              合并导入（匹配键去重、事务式、不删既有）
     JwCaptureService.cs           教务页悬浮球注入与一键抓取
+    ExamService.cs                教务考试 JSON 请求、分页与时间/字段解析
+    ExamCacheStore.cs             exams.json 分学期考试缓存
   Views/                          MainWindow / TodoShellView / LoginView
                                   ChaoxingLoginView / PigaiLoginView
                                   TimetableView（周视图网格）/ JwImportView（教务导入）
+                                  ExamInfoView（考试列表与学期筛选）
                                   WidgetView + WidgetWindow（桌面小组件）
   Styles/TodoTheme.axaml          仿 To Do 的 Fluent 控件样式（含深色主题）
   Styles/WidgetTheme.axaml        桌面小组件的深色半透明样式

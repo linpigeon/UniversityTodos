@@ -44,7 +44,7 @@ internal sealed class WindowsNotifier : INotifier
     private bool _registered;
     private string? _unavailableReason;
 
-    public WindowsNotifier()
+    public WindowsNotifier(bool updateShortcut = true)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -56,7 +56,7 @@ internal sealed class WindowsNotifier : INotifier
         {
             CleanupLegacyRegistration();
             RegisterAumid();
-            EnsureStartMenuShortcut();
+            if (updateShortcut) EnsureStartMenuShortcut();
             _registered = true;
         }
         catch (Exception ex)

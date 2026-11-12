@@ -42,15 +42,19 @@ $env:AVALONIA_TELEMETRY_OPTOUT = '1'
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:DOTNET_NOLOGO = '1'
 
-# 正在运行的实例会锁住输出目录。
-$running = Get-Process UniversityTodos.Desktop -ErrorAction SilentlyContinue
+$outDir = Join-Path $root "publish\$Mode"
+
+# 只关闭确实占用本次输出目录的实例，避免误关 Visual Studio 调试进程或其它安装版本。
+$targetExe = Join-Path $outDir 'UniversityTodos.Desktop.exe'
+$running = Get-Process UniversityTodos.Desktop -ErrorAction SilentlyContinue | Where-Object {
+    try { $_.Path -eq $targetExe } catch { $false }
+}
 if ($running) {
-    Write-Host "== stopping $($running.Count) running instance(s) ==" -ForegroundColor Yellow
+    Write-Host "== stopping $($running.Count) running instance(s) in $outDir ==" -ForegroundColor Yellow
     $running | Stop-Process -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 800
 }
 
-$outDir = Join-Path $root "publish\$Mode"
 if (Test-Path $outDir) { Remove-Item $outDir -Recurse -Force }
 
 $args = @(

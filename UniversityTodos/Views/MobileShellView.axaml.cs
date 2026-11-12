@@ -29,6 +29,7 @@ public partial class MobileShellView : UserControl
 
     private NativeWebView? _examWebView;
     private TimetableView? _timetableView;
+    private ElectricityView? _electricityView;
     private bool _examWebReady;
     private bool _trackingDrawerGesture;
     private Avalonia.Point _drawerGestureStart;
@@ -72,6 +73,11 @@ public partial class MobileShellView : UserControl
                 UpdateTimetablePage();
                 SyncMobileNav();
             }
+            else if (e.PropertyName == nameof(MainViewModel.ElectricityOpen))
+            {
+                UpdateElectricityPage();
+                SyncMobileNav();
+            }
             else if (e.PropertyName is nameof(MainViewModel.SelectedNav)
                      or nameof(MainViewModel.SettingsOpen))
             {
@@ -82,6 +88,7 @@ public partial class MobileShellView : UserControl
         vm.PropertyChanged += _vmHandler;
         SyncMobileNav();
         UpdateTimetablePage();
+        UpdateElectricityPage();
         UpdateLoginPage();
         if (vm.ExamWebUrl is not null) NavigateExamWeb();
     }
@@ -101,6 +108,8 @@ public partial class MobileShellView : UserControl
         CloseExamWebView();
         TimetableContentHost.Content = null;
         _timetableView = null;
+        ElectricityContentHost.Content = null;
+        _electricityView = null;
         LoginContentHost.Content = null;
     }
 
@@ -143,14 +152,16 @@ public partial class MobileShellView : UserControl
     {
         if (Vm is not { } vm) return;
 
-        // 顺序与叠放层次一致（后加的在上）：编辑器 → 登录页 → 答题页 → 教务导入 → 设置 → 详情 → 课表 → 抽屉。
+        // 顺序与叠放层次一致（后加的在上）：编辑器 → 登录页 → 答题页 → 教务导入 → 设置 → 详情 → 课表/电费 → 抽屉。
         if (ManualEditorOverlay.IsVisible) { CloseManualEditor(); e.Handled = true; return; }
         if (vm.LoginPageOpen is not null) { vm.CloseLoginPage(); e.Handled = true; return; }
         if (vm.ExamWebUrl is not null) { vm.CloseExamWeb(); e.Handled = true; return; }
         if (vm.JwImportOpen) { vm.CloseJwImport(); e.Handled = true; return; }
+        if (vm.ExamInfoOpen) { vm.CloseExamInfo(); e.Handled = true; return; }
         if (vm.SettingsOpen) { vm.SettingsOpen = false; e.Handled = true; return; }
         if (vm.SelectedItem is not null) { vm.SelectedItem = null; e.Handled = true; return; }
         if (vm.TimetableOpen) { vm.CloseTimetable(); e.Handled = true; return; }
+        if (vm.ElectricityOpen) { vm.CloseElectricityCommand.Execute(null); e.Handled = true; return; }
         if (vm.DrawerOpen) { vm.DrawerOpen = false; e.Handled = true; }
     }
 
@@ -167,6 +178,19 @@ public partial class MobileShellView : UserControl
             TimetableContentHost.Content = _timetableView;
     }
 
+    private void UpdateElectricityPage()
+    {
+        if (Vm?.ElectricityOpen != true)
+        {
+            ElectricityContentHost.Content = null;
+            return;
+        }
+
+        _electricityView ??= new ElectricityView();
+        if (!ReferenceEquals(ElectricityContentHost.Content, _electricityView))
+            ElectricityContentHost.Content = _electricityView;
+    }
+
     private void UpdateLoginPage()
     {
         if (Vm is not { } vm) return;
@@ -176,6 +200,7 @@ public partial class MobileShellView : UserControl
             "ykt" => new LoginView(),
             "chaoxing" => new ChaoxingLoginView(),
             "pigai" => new PigaiLoginView(),
+            "water" => new WaterLoginView(),
             _ => null,
         };
     }
@@ -236,7 +261,7 @@ public partial class MobileShellView : UserControl
 
     /// <summary>
     /// 底部导航点击：待办统一映射到 NavItems 的 key=all，
-    /// 课表/设置复用原逻辑；不复制筛选逻辑，也不新增业务导航状态。
+    /// 课表/电费/设置复用原逻辑；不复制筛选逻辑，也不新增业务导航状态。
     /// </summary>
     private void OnMobileNavClick(object? sender, RoutedEventArgs e)
     {
@@ -249,6 +274,8 @@ public partial class MobileShellView : UserControl
             // （恢复打开课表前的列表），否则返回后 SelectedNav 会停在 timetable，
             // 而课表页已经关掉，底栏与列表内容对不上。
             if (vm.TimetableOpen) vm.CloseTimetable();
+            if (vm.ExamInfoOpen) vm.CloseExamInfo();
+            if (vm.ElectricityOpen) vm.CloseElectricityCommand.Execute(null);
             vm.OpenSettings();
         }
         else
@@ -264,9 +291,9 @@ public partial class MobileShellView : UserControl
     }
 
     /// <summary>
-    /// 把三个底部按钮的 selected class 与当前状态对齐。
+    /// 把四个底部按钮的 selected class 与当前状态对齐。
     /// <para>
-    /// 设置页打开时高亮“设置”；课表页打开时高亮“课表”；其余任何列表筛选
+    /// 设置页打开时高亮“设置”；课表/电费页打开时高亮各自入口；其余任何列表筛选
     /// （myday / homework / planned / all 等）都高亮“待办”。只改 class，
     /// 不维护第二份导航状态。
     /// </para>
@@ -278,10 +305,13 @@ public partial class MobileShellView : UserControl
             ? "settings"
             : vm?.TimetableOpen == true
                 ? "timetable"
-                : "todo";
+                : vm?.ElectricityOpen == true
+                    ? "electricity"
+                    : "todo";
 
         TodoNavButton.Classes.Set("selected", key == "todo");
         TimetableNavButton.Classes.Set("selected", key == "timetable");
+        ElectricityNavButton.Classes.Set("selected", key == "electricity");
         SettingsNavButton.Classes.Set("selected", key == "settings");
     }
 
@@ -319,7 +349,7 @@ public partial class MobileShellView : UserControl
     private void OnTodoPointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (!e.Pointer.IsPrimary || Vm is not { } vm || vm.DrawerOpen
-            || vm.SettingsOpen || vm.TimetableOpen || vm.JwImportOpen || vm.SelectedItem is not null)
+            || vm.SettingsOpen || vm.TimetableOpen || vm.ElectricityOpen || vm.JwImportOpen || vm.SelectedItem is not null)
             return;
 
         _trackingDrawerGesture = true;

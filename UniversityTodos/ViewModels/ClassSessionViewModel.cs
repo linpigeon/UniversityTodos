@@ -11,6 +11,10 @@ public sealed class ClassSessionViewModel(ClassSession session)
 
     public string TimeText => $"{Model.StartTime}-{Model.EndTime}";
 
+    public string StartTimeText => Model.StartTime;
+
+    public string EndTimeText => Model.EndTime;
+
     public string Location => Model.Location ?? string.Empty;
 
     public bool HasLocation => !string.IsNullOrWhiteSpace(Model.Location);

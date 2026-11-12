@@ -9,14 +9,7 @@ using UniversityTodos.Services;
 
 namespace UniversityTodos.ViewModels;
 
-/// <summary>
-/// 时间表编辑器里的一行：一个节次的起止时间。
-/// <para>
-/// 时间刻意用**字符串**而不是 <see cref="TimeOnly"/>：手输更容易（用户会直接敲 0800、
-/// 8:00 这类写法），而且格式问题应该在**保存时**给出人能看懂的提示，
-/// 而不是让输入框悄悄把非法值吞掉。
-/// </para>
-/// </summary>
+/// <summary>时间表编辑器里的一行：通过时间选择控件修改一个节次的起止时间。</summary>
 public sealed partial class PeriodRowViewModel : ViewModelBase
 {
     public PeriodRowViewModel(int period, string startTime, string endTime)
@@ -39,6 +32,24 @@ public sealed partial class PeriodRowViewModel : ViewModelBase
     [ObservableProperty]
     private bool _compactMode;
 
+    public TimeSpan? StartTimeValue
+    {
+        get => ParseClock(StartTime);
+        set
+        {
+            if (value is not null) StartTime = FormatClock(value.Value);
+        }
+    }
+
+    public TimeSpan? EndTimeValue
+    {
+        get => ParseClock(EndTime);
+        set
+        {
+            if (value is not null) EndTime = FormatClock(value.Value);
+        }
+    }
+
     /// <summary>这一节是否停用（起止都是 00:00）。</summary>
     public bool IsDisabled =>
         StartTime.Trim() == Timetable.DisabledPeriodTime && EndTime.Trim() == Timetable.DisabledPeriodTime;
@@ -48,9 +59,22 @@ public sealed partial class PeriodRowViewModel : ViewModelBase
 
     public bool HasDisabledHint => IsDisabled;
 
-    partial void OnStartTimeChanged(string value) => NotifyDisabledChanged();
+    partial void OnStartTimeChanged(string value)
+    {
+        OnPropertyChanged(nameof(StartTimeValue));
+        NotifyDisabledChanged();
+    }
 
-    partial void OnEndTimeChanged(string value) => NotifyDisabledChanged();
+    partial void OnEndTimeChanged(string value)
+    {
+        OnPropertyChanged(nameof(EndTimeValue));
+        NotifyDisabledChanged();
+    }
+
+    private static TimeSpan? ParseClock(string value) =>
+        TimeSpan.TryParse(value, out var parsed) ? parsed : null;
+
+    private static string FormatClock(TimeSpan value) => $"{value.Hours:00}:{value.Minutes:00}";
 
     private void NotifyDisabledChanged()
     {

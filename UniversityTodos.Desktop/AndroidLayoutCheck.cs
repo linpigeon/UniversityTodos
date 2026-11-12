@@ -196,7 +196,7 @@ internal static class AndroidLayoutCheck
     }
 
     /// <summary>
-    /// 底部导航的真实 UI 事件自检：构造移动外壳后**实际点击**三个按钮，
+    /// 底部导航的真实 UI 事件自检：构造移动外壳后**实际点击**四个按钮，
     /// 断言 SelectedNav / SettingsOpen / TimetableOpen 与 selected class，
     /// 再用 <see cref="TopLevel.BackRequestedEvent"/> 走一遍原来的返回逻辑。
     /// 只构造按钮不点击是测不到 CodeBehind 接线的。
@@ -209,6 +209,7 @@ internal static class AndroidLayoutCheck
         vm.OnNavChanged();
         vm.SettingsOpen = false;
         vm.TimetableOpen = false;
+        vm.ElectricityOpen = false;
         vm.DrawerOpen = false;
         vm.SelectedItem = null;
 
@@ -238,6 +239,7 @@ internal static class AndroidLayoutCheck
 
             var todo = Find("TodoNavButton");
             var timetable = Find("TimetableNavButton");
+            var electricity = Find("ElectricityNavButton");
             var settings = Find("SettingsNavButton");
 
             Button Find(string name) => shell.FindControl<Button>(name)
@@ -294,6 +296,16 @@ internal static class AndroidLayoutCheck
             Check(!vm.TimetableOpen && vm.SelectedNav?.Key == "myday"
                   && Selected(todo) && !Selected(timetable),
                 "再进课表后返回：关闭课表，待办按钮恢复选中");
+
+            Click(electricity);
+            Check(vm.ElectricityOpen && vm.SelectedNav?.Key == "electricity"
+                  && Selected(electricity) && !Selected(todo) && !Selected(timetable) && !Selected(settings),
+                "点击「电费」：ElectricityOpen=true，电费按钮选中");
+
+            Back();
+            Check(!vm.ElectricityOpen && vm.SelectedNav?.Key == "myday"
+                  && Selected(todo) && !Selected(electricity),
+                "电费页返回：关闭电费页并恢复原列表");
 
             Click(todo);
             Check(vm.SelectedNav?.Key == "all" && Selected(todo) && !Selected(timetable),
@@ -411,6 +423,15 @@ internal static class AndroidLayoutCheck
             Pump(state.NeedsWebView ? 40 : 6);
             Pump(3);
 
+            if (state.Name == "water")
+            {
+                var scroller = view.GetVisualDescendants()
+                    .OfType<ScrollViewer>()
+                    .FirstOrDefault(sv => sv.Content is StackPanel);
+                scroller?.ScrollToEnd();
+                Pump(3);
+            }
+
             var defects = Inspect(frame, state).ToList();
 
             if (DebugEnabled)
@@ -440,10 +461,14 @@ internal static class AndroidLayoutCheck
     {
         vm.SettingsOpen = false;
         vm.TimetableOpen = false;
+        vm.ExamInfoOpen = false;
+        vm.ExamSectionIndex = 0;
+        vm.ElectricityOpen = false;
         vm.DrawerOpen = false;
         vm.LoginPageOpen = null;
         vm.ExamWebUrl = null;
         vm.JwImportOpen = false;
+        vm.SelectedNav = vm.NavItems[0];
         vm.SelectedItem = null;
         vm.List.ClearCourseSelection();
         vm.IsBusy = false;
@@ -463,6 +488,71 @@ internal static class AndroidLayoutCheck
         vm.Timetable.SelectedBlock = null;
         vm.Timetable.ShowOtherWeeks = false;
         vm.Timetable.ShowWeekend = true;
+
+        vm.Electricity.Rooms =
+        [
+            new ElectricityRoom { RoomName = "桃李园 1 栋 501", RoomVerify = "room-1", Odd = 8.5, Use = 126.3, Status = 1 },
+            new ElectricityRoom { RoomName = "榕园 3 栋 208", RoomVerify = "room-2", Odd = 36.8, Use = 89.4, Status = 1 },
+        ];
+        vm.Electricity.SelectedRoom = vm.Electricity.Rooms[0];
+        vm.Electricity.LastUpdated = new DateTimeOffset(2026, 11, 7, 10, 30, 0, TimeSpan.FromHours(8));
+        vm.Water.ApplyBills(
+        [
+            new WaterBill { Sequence = 105, RoomNumber = "313", WaterType = "冷水", StartDate = "2026/06/25", EndDate = "2026/09/29", Usage = 17, Fee = 46.75 },
+            new WaterBill { Sequence = 106, RoomNumber = "313", WaterType = "热水", StartDate = "2026/06/25", EndDate = "2026/09/29", Usage = 9, Fee = 214.20 },
+        ], vm.Electricity.LastUpdated);
+        vm.Water.ApplyHistoryBills(
+        [
+            new WaterBill { Sequence = 103, RoomNumber = "313", WaterType = "冷水", StartDate = "2026/05/26", EndDate = "2026/06/25", Usage = 12, Fee = 33.00 },
+            new WaterBill { Sequence = 104, RoomNumber = "313", WaterType = "热水", StartDate = "2026/05/26", EndDate = "2026/06/25", Usage = 7, Fee = 166.60 },
+        ], vm.Electricity.LastUpdated);
+        vm.Water.ShowHistory = true;
+        vm.ExamInfo.ApplyItemsForCheck(
+        [
+            new ExamInfo
+            {
+                AcademicYear = vm.ExamInfo.AcademicYear, Semester = vm.ExamInfo.Semester,
+                CourseName = "示例课程：考试信息完整字段", CourseCode = "B0000001",
+                ExamName = "2026-2027-1学期期末考试", ExamMethod = "笔试",
+                Location = "博文楼阶梯E202", Campus = "珠海", SeatNumber = "49",
+                TeachingClass = "(2026-2027-1)-B0000001-03", College = "示例学院",
+                StartAt = new DateTime(2026, 12, 20, 9, 0, 0),
+                EndAt = new DateTime(2026, 12, 20, 11, 0, 0),
+            },
+            new ExamInfo
+            {
+                AcademicYear = vm.ExamInfo.AcademicYear, Semester = vm.ExamInfo.Semester,
+                CourseName = "另一门考试课程", ExamName = "期末考试",
+                Location = "明德楼A419", Campus = "珠海",
+                StartAt = new DateTime(2026, 12, 22, 13, 30, 0),
+                EndAt = new DateTime(2026, 12, 22, 15, 30, 0),
+            },
+        ]);
+        vm.GradeInfo.ApplyItemsForCheck(
+        [
+            new GradeInfo
+            {
+                AcademicYear = vm.GradeInfo.AcademicYear, Semester = vm.GradeInfo.Semester,
+                CourseCode = "B0000001", CourseName = "示例课程：成绩完整字段",
+                CourseNature = "必修课", Credits = 3, GradeText = "92",
+                PercentScore = 92, GradePoint = 4, CreditPoint = 12,
+                Assessment = "考试", ExamNature = "正常考试", Teacher = "教师甲", College = "示例学院",
+            },
+            new GradeInfo
+            {
+                AcademicYear = vm.GradeInfo.AcademicYear, Semester = vm.GradeInfo.Semester,
+                CourseCode = "B0000002", CourseName = "另一门课程",
+                CourseNature = "任选课", Credits = 1, GradeText = "优秀",
+                GradePoint = 4, CreditPoint = 4, Assessment = "考查",
+            },
+        ], new AcademicStats
+        {
+            MinimumGraduationCredits = 165,
+            PlannedCourseCount = 91,
+            EarnedCredits = 80,
+            WeightedGradePoint = 3.52,
+            AverageScore = 86.75,
+        });
     }
 
     private static IReadOnlyList<ScreenState> BuildStates(bool includeWebViewStates)
@@ -471,6 +561,12 @@ internal static class AndroidLayoutCheck
         {
             new("list", "待办列表（有内容：长标题 / 逾期 / 进度徽标 / 已完成）",
                 _ => { }),
+            new("myday", "我的一天（今日课程双列列表 + 待办）",
+                vm =>
+                {
+                    vm.SelectedNav = vm.NavItems.Single(item => item.Key == "myday");
+                    vm.OnNavChanged();
+                }),
             new("list-empty", "待办列表（空状态文案）",
                 vm => vm.List.Replace([])),
             new("drawer", "抽屉（侧边栏导航 + 遮罩）",
@@ -501,6 +597,14 @@ internal static class AndroidLayoutCheck
                     vm.Timetable.ShowOtherWeeks = true;
                     vm.OpenTimetable();
                 }),
+            new("exam-info", "考试信息（学期筛选 + 完整考试卡片 + 空字段回退）",
+                vm => vm.OpenExamInfo()),
+            new("grade-info", "学分与成绩（统计卡片 + 学期成绩列表）",
+                vm => { vm.ExamSectionIndex = 1; vm.OpenExamInfo(); }),
+            new("electricity", "宿舍电费（低电量提醒 + 宿舍列表）",
+                vm => vm.OpenElectricity()),
+            new("water", "宿舍水费（最近账期 + 冷热水合计，滚动到页底）",
+                vm => vm.OpenElectricity()),
             new("warning-busy", "列表 + 警告条 + 忙碌条（最拥挤的头部）",
                 vm =>
                 {

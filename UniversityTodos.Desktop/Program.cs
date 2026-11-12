@@ -21,9 +21,14 @@ sealed class Program
 
         try
         {
-            Directory.CreateDirectory(AppPaths.WebView2UserDataFolder);
-            Environment.SetEnvironmentVariable(
-                "WEBVIEW2_USER_DATA_FOLDER", AppPaths.WebView2UserDataFolder);
+            var processName = Path.GetFileName(Environment.ProcessPath) ?? "UniversityTodos.Desktop.exe";
+            var currentProfile = Path.Combine(AppPaths.ApplicationDirectory, processName + ".WebView2");
+            var legacyProfile = Path.Combine(AppPaths.ApplicationDirectory, "HomeworkReminder.Desktop.exe.WebView2");
+            var profile = Directory.Exists(currentProfile) ? currentProfile
+                : Directory.Exists(legacyProfile) ? legacyProfile
+                : AppPaths.WebView2UserDataFolder;
+            Directory.CreateDirectory(profile);
+            Environment.SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", profile);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
@@ -90,6 +95,57 @@ sealed class Program
             Log("UNOBSERVED TASK: " + e.Exception);
             e.SetObserved();
         };
+
+        if (args.Contains("--logingatecheck"))
+        {
+            LoginGateCheck.Run();
+            return;
+        }
+
+        if (args.Contains("--watersilentcheck"))
+        {
+            WaterSilentCheck.Run();
+            return;
+        }
+
+        if (args.Contains("--watersilentflowcheck"))
+        {
+            WaterSilentFlowCheck.Run();
+            return;
+        }
+
+        if (args.Contains("--watercoldcheck"))
+        {
+            WaterColdCheck.Run();
+            return;
+        }
+
+        if (args.Contains("--examinfocheck"))
+        {
+            ExamInfoCheck.Run();
+            return;
+        }
+
+        if (args.Contains("--examflowcheck"))
+        {
+            ExamFlowCheck.Run();
+            return;
+        }
+
+        if (args.Contains("--gradecreditcheck"))
+        {
+            GradeCreditCheck.Run();
+            return;
+        }
+
+        if (args.Contains("--watercheck"))
+        {
+            WaterCheck.Run();
+            return;
+        }
+
+        if (args.Contains("--electricity-toastcheck"))
+            Environment.Exit(ToastCheck.RunElectricity());
 
         if (args.Contains("--toastcheck"))
             Environment.Exit(ToastCheck.Run());

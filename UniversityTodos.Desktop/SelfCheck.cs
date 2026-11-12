@@ -45,6 +45,14 @@ internal static class SelfCheck
 
         try
         {
+            if (window.DataContext is MainViewModel vm)
+            {
+                var page = Environment.GetEnvironmentVariable("SELFCHECK_PAGE");
+                if (page == "electricity") vm.OpenElectricity();
+                else if (page == "timetable") vm.OpenTimetable();
+                if (Environment.GetEnvironmentVariable("SELFCHECK_EMPTY_ROOMS") == "1")
+                    vm.Electricity.SelectedRoom = null;
+            }
             window.Show();
             Dispatcher.UIThread.RunJobs();
 

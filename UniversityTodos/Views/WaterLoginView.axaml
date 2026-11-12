@@ -1,0 +1,37 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UniversityTodos.ViewModels"
+             xmlns:controls="using:Avalonia.Controls"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="480" d:DesignHeight="700"
+             x:Class="UniversityTodos.Views.WaterLoginView"
+             x:DataType="vm:MainViewModel"
+             Background="Transparent">
+  <Grid RowDefinitions="Auto,*">
+    <StackPanel Grid.Row="0" Margin="36,22,36,0"
+                IsVisible="{Binding !LoginBackgroundRequested}">
+      <TextBlock Text="统一身份认证" FontSize="20" FontWeight="SemiBold"
+                 Foreground="{DynamicResource TodoTextPrimary}" />
+      <TextBlock Text="在下方页面手动登录，认证成功后自动读取最近水费账单"
+                 FontSize="12" Margin="0,3,0,0" TextWrapping="Wrap"
+                 Foreground="{DynamicResource TodoTextTertiary}" />
+    </StackPanel>
+
+    <Panel Grid.Row="1" Margin="16,10,16,16">
+      <controls:NativeWebView Name="WaterWebView" IsVisible="False" />
+      <StackPanel Name="WebViewPlaceholder" VerticalAlignment="Center" Spacing="10"
+                  HorizontalAlignment="Center">
+        <TextBlock Classes="icon" Text="&#xF029;" FontSize="34"
+                   HorizontalAlignment="Center"
+                   Foreground="{DynamicResource TodoTextTertiary}" />
+        <TextBlock Text="正在准备统一认证页面…" FontSize="13" HorizontalAlignment="Center"
+                   Foreground="{DynamicResource TodoTextTertiary}" />
+      </StackPanel>
+    </Panel>
+    <TextBlock Grid.Row="2" Text="{Binding Water.StatusMessage}" FontSize="12"
+               Margin="36,0,36,16" TextWrapping="Wrap" TextAlignment="Center"
+               IsVisible="{Binding !LoginBackgroundRequested}"
+               Foreground="{DynamicResource TodoTextSecondary}" />
+  </Grid>
+</UserControl>

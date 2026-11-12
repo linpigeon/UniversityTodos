@@ -9,7 +9,7 @@ using UniversityTodos.ViewModels;
 namespace UniversityTodos.Views;
 
 /// <summary>
-/// 教务课表导入：在**独立弹窗**里打开教务系统，注入悬浮球，抓取当前页并合并导入。
+/// 教务数据导入：在**独立弹窗**里打开教务系统；课表通过悬浮球抓取，考试信息进入查询页后直接读取 JSON。
 /// <para>
 /// <b>为什么用 <see cref="NativeWebDialog"/> 而不是内嵌 <see cref="NativeWebView"/></b>：
 /// 实测内嵌方案有两个问题——弹窗与会话内容挤在同一块区域（与待办列表重叠），
@@ -50,6 +50,7 @@ public partial class JwImportView : UserControl
     /// </para>
     /// </summary>
     private bool _initialNavigationStarted;
+    private bool _sessionPrepared;
 
     public JwImportView()
     {
@@ -65,8 +66,17 @@ public partial class JwImportView : UserControl
     /// </summary>
     private void TryNavigateInitial(MainViewModel vm)
     {
-        if (!_adapterCreated || !_dialogShown) return;
-        NavigateToLoginPage(vm);
+        if (!_adapterCreated || !_dialogShown || _sessionPrepared) return;
+        var dialog = _dialog;
+        if (dialog is null) return;
+        _sessionPrepared = true;
+        _ = RestoreAndNavigateAsync(vm, dialog);
+    }
+
+    private async Task RestoreAndNavigateAsync(MainViewModel vm, NativeWebDialog dialog)
+    {
+        await JwSessionService.RestoreAsync(dialog, vm.JwEffectiveLoginUrl).ConfigureAwait(true);
+        if (ReferenceEquals(_dialog, dialog)) NavigateToLoginPage(vm);
     }
 
     protected override void OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
@@ -114,7 +124,7 @@ public partial class JwImportView : UserControl
         {
             dialog = new NativeWebDialog
             {
-                Title = "教务系统 · 登录并进入课表查询页",
+                Title = vm.JwImportForGrades ? "教务系统 · 成绩与执行计划" : vm.JwImportForExam ? "教务系统 · 考试信息查询" : "教务系统 · 登录并进入课表查询页",
                 CanUserResize = true,
                 ShowFocused = true,
             };
@@ -131,6 +141,7 @@ public partial class JwImportView : UserControl
         // 每次重开都是新弹窗：首次导航与页面就绪状态都要跟着重置，
         // 否则会带着上一个弹窗的「已就绪」状态去撞新页面的加载期。
         _initialNavigationStarted = false;
+        _sessionPrepared = false;
         _adapterCreated = false;
         _dialogShown = false;
         _pageGate.Reset();
@@ -162,8 +173,13 @@ public partial class JwImportView : UserControl
                 ? $"当前页面：{e.Request}"
                 : $"页面加载失败（{e.Request}）：请确认网址与网络后重试。";
             _pageGate.MarkReady();
+            if (e.IsSuccess) _ = JwSessionService.SaveAsync(dialog, vm.JwEffectiveLoginUrl);
             // 页面每次加载完成后悬浮球都会被清掉，这里立刻重启循环（内部会重新注入）。
             StartBallLoop();
+            if (vm.JwImportForExam && e.IsSuccess && ExamService.IsExamPage(e.Request))
+                _ = FetchExamInfoAsync(vm);
+            if (vm.JwImportForGrades && e.IsSuccess && GradeService.IsGradePage(e.Request))
+                _ = FetchGradeInfoAsync(vm);
         };
 
         // 二级页在同一窗口内跳转：教务菜单多以新窗口打开功能页。
@@ -186,6 +202,7 @@ public partial class JwImportView : UserControl
             // 用户直接关掉弹窗：同步收起导入面板，否则会留下一个没有窗口的空面板。
             JwCaptureService.Log("弹窗被用户关闭");
             StopBallLoop();
+            _ = JwSessionService.SaveAsync(dialog, vm.JwEffectiveLoginUrl);
             _dialog = null;
             MainViewModel.JwDialogAccessor = null;
             MainViewModel.JwPageGate = null;
@@ -249,7 +266,8 @@ public partial class JwImportView : UserControl
         Uri target;
         try
         {
-            target = new Uri(url);
+            target = new Uri(vm.JwImportForGrades ? GradeService.BuildGradePageUrl(url)
+                : vm.JwImportForExam ? ExamService.BuildExamPageUrl(url) : url);
         }
         catch (UriFormatException ex)
         {
@@ -286,10 +304,14 @@ public partial class JwImportView : UserControl
     private void CloseDialog()
     {
         StopBallLoop();
+        var dialog = _dialog;
+        var loginUrl = Vm?.JwEffectiveLoginUrl;
+        if (dialog is not null && _adapterCreated && !string.IsNullOrWhiteSpace(loginUrl))
+            _ = JwSessionService.SaveAsync(dialog, loginUrl);
         _dialogShown = false;
         _adapterCreated = false;
         _initialNavigationStarted = false;
-        var dialog = _dialog;
+        _sessionPrepared = false;
         _dialog = null;
         MainViewModel.JwDialogAccessor = null;
         MainViewModel.JwPageGate = null;
@@ -305,6 +327,7 @@ public partial class JwImportView : UserControl
     {
         if (_running || _dialog is null) return;
         if (Vm is not { JwImportOpen: true } vm) return;
+        if (vm.JwImportForExam || vm.JwImportForGrades) return;
         if (!vm.HasJwProfile)
         {
             vm.SetTimetableStatus("请先在 设置 → 账号 填写学校教务系统登录页网址。");
@@ -393,12 +416,38 @@ public partial class JwImportView : UserControl
         if (Vm is not { } vm) return;
         try
         {
-            await vm.FetchJwScheduleNowAsync();
+            if (vm.JwImportForGrades) await vm.FetchJwGradesNowAsync();
+            else if (vm.JwImportForExam) await vm.FetchJwExamsNowAsync();
+            else await vm.FetchJwScheduleNowAsync();
         }
         catch (Exception ex)
         {
             // async void：不能让异常逃逸。
             JwCaptureService.Log($"手动抓取异常: {ex.Message}");
+        }
+    }
+
+    private static async Task FetchExamInfoAsync(MainViewModel vm)
+    {
+        try
+        {
+            await vm.FetchJwExamsNowAsync();
+        }
+        catch (Exception ex)
+        {
+            JwCaptureService.Log($"自动读取考试信息异常: {ex.Message}");
+        }
+    }
+
+    private static async Task FetchGradeInfoAsync(MainViewModel vm)
+    {
+        try
+        {
+            await vm.FetchJwGradesNowAsync();
+        }
+        catch (Exception ex)
+        {
+            JwCaptureService.Log($"自动读取成绩与学分异常: {ex.Message}");
         }
     }
 

@@ -10,7 +10,7 @@
              x:DataType="vm:MainViewModel">
 
   <!--
-    Android 外壳：移动布局 = 内容区 + 三项底部导航（待办 / 课表 / 设置）。
+    Android 外壳：移动布局 = 内容区 + 四项底部导航（待办 / 课表 / 电费 / 设置）。
     列表、课表与设置占第 0 行；底部导航占第 1 行并持续可见（抽屉打开时除外）。
     详情 / 答题 / 登录 / 教务导入等整页覆盖层以及抽屉仍用 Grid.RowSpan=2 盖住底栏；
     课表和设置不再盖住底栏，只占用内容区。
@@ -36,13 +36,13 @@
     <views:TodoListView Name="MobileTodoList" Grid.Row="0" DrawerMode="True"
                         IsVisible="{Binding ShowTodoPane}" />
 
-    <!-- 底部导航：三项等宽（待办 / 课表 / 设置），复用 MainViewModel 的
+    <!-- 底部导航：四项等宽（待办 / 课表 / 电费 / 设置），复用 MainViewModel 的
          NavItems / SelectedNav / OpenSettings，不新增业务导航状态。
-         “待办”统一映射到 key=all，“课表/设置”保持原覆盖层逻辑；
+         “待办”统一映射到 key=all，“课表/电费/设置”保持原覆盖层逻辑；
          选中态由 MobileShellView.axaml.cs 同步。抽屉打开时整条收起。 -->
     <Border Grid.Row="1" Name="MobileNavBar" Classes="mobile-nav"
             IsVisible="{Binding !DrawerOpen}">
-      <Grid ColumnDefinitions="*,*,*">
+      <Grid ColumnDefinitions="*,*,*,*">
 
         <Button Grid.Column="0" Name="TodoNavButton" Classes="mobile-nav"
                 Classes.selected="True" Tag="todo" Click="OnMobileNavClick">
@@ -64,7 +64,17 @@
           </StackPanel>
         </Button>
 
-        <Button Grid.Column="2" Name="SettingsNavButton" Classes="mobile-nav"
+        <Button Grid.Column="2" Name="ElectricityNavButton" Classes="mobile-nav"
+                Tag="electricity" Click="OnMobileNavClick">
+          <StackPanel Spacing="2" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <Border Classes="mobile-nav-pill">
+              <TextBlock Classes="icon" Text="&#xF0E7;" />
+            </Border>
+            <TextBlock Text="电费" />
+          </StackPanel>
+        </Button>
+
+        <Button Grid.Column="3" Name="SettingsNavButton" Classes="mobile-nav"
                 Tag="settings" Click="OnMobileNavClick">
           <StackPanel Spacing="2" HorizontalAlignment="Center" VerticalAlignment="Center">
             <Border Classes="mobile-nav-pill">
@@ -87,6 +97,14 @@
     -->
     <ContentControl Name="TimetableContentHost" Grid.Row="0"
                     IsVisible="{Binding TimetableOpen}" />
+
+    <ContentControl Name="ElectricityContentHost" Grid.Row="0"
+                    IsVisible="{Binding ElectricityOpen}" />
+
+    <Border Grid.RowSpan="2" Background="{DynamicResource TodoDialogBackground}"
+            IsVisible="{Binding ExamInfoOpen}">
+      <views:ExamInfoView />
+    </Border>
 
     <!-- 教务导入页：覆盖课表与底部导航。控制面板用不透明底；
          真正的教务网页由 JwImportView 在独立 NativeWebDialog 中打开。 -->
@@ -152,19 +170,28 @@
 
     <!-- 登录覆盖层（雨课堂 / 学习通，从设置页「账号」进入；启动不再弹登录） -->
     <Border Grid.RowSpan="2"
-            Background="{DynamicResource TodoDialogBackground}"
-            IsVisible="{Binding LoginPageOpen, Converter={x:Static ObjectConverters.IsNotNull}}">
-      <Grid RowDefinitions="Auto,*">
-        <Button Grid.Row="0" Classes="tool" Click="OnLoginBackClick"
-                Margin="10,10,0,0" HorizontalAlignment="Left"
-                ToolTip.Tip="返回设置">
-          <StackPanel Orientation="Horizontal" Spacing="6">
-            <TextBlock Classes="icon" Text="&#xF060;" />
-            <TextBlock Text="返回" FontSize="13" VerticalAlignment="Center"
-                       Foreground="{DynamicResource TodoTextSecondary}" />
-          </StackPanel>
-        </Button>
-        <ContentControl Name="LoginContentHost" Grid.Row="1" />
+            Background="Transparent"
+            IsVisible="{Binding LoginHostVisible}"
+            IsHitTestVisible="True">
+      <Border.RenderTransform>
+        <TranslateTransform X="{Binding LoginOverlayOffsetX}" />
+      </Border.RenderTransform>
+      <Grid>
+        <Border Background="{DynamicResource TodoDialogBackground}"
+                IsVisible="{Binding !LoginBackgroundRequested}" />
+        <Grid RowDefinitions="Auto,*">
+          <Button Grid.Row="0" Classes="tool" Click="OnLoginBackClick"
+                  Margin="10,10,0,0" HorizontalAlignment="Left"
+                  IsVisible="{Binding !LoginBackgroundRequested}"
+                  ToolTip.Tip="返回设置">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <TextBlock Classes="icon" Text="&#xF060;" />
+              <TextBlock Text="返回" FontSize="13" VerticalAlignment="Center"
+                         Foreground="{DynamicResource TodoTextSecondary}" />
+            </StackPanel>
+          </Button>
+          <ContentControl Name="LoginContentHost" Grid.Row="1" />
+        </Grid>
       </Grid>
     </Border>
 

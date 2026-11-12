@@ -140,13 +140,17 @@ public sealed partial class TimetableBlockViewModel : ViewModelBase
 /// <summary>周视图的一天列表头（星期 + 日期，以及「今天」标记）。</summary>
 public sealed partial class TimetableDayHeaderViewModel : ViewModelBase
 {
-    public TimetableDayHeaderViewModel(int weekday, string name, string dateText, bool isToday)
+    public TimetableDayHeaderViewModel(
+        int weekday, string name, string dateText, bool isToday, bool compactMode = false)
     {
         Weekday = weekday;
         DayName = name;
         DateText = dateText;
         IsToday = isToday;
+        CompactMode = compactMode;
     }
+
+    public bool CompactMode { get; }
 
     /// <summary>星期（1 = 周一 … 7 = 周日）。</summary>
     public int Weekday { get; }
@@ -552,7 +556,7 @@ public sealed partial class TimetableViewModels : ViewModelBase
                 isToday = IsCurrentWeekDisplayed && today is { } t && t == date;
             }
 
-            target.Add(new TimetableDayHeaderViewModel(i + 1, label, dateText, isToday));
+            target.Add(new TimetableDayHeaderViewModel(i + 1, label, dateText, isToday, CompactMode));
         }
 
         _ = termStartDate;

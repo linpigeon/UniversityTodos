@@ -14,6 +14,14 @@ public partial class TodoListView : UserControl
     public TodoListView()
     {
         InitializeComponent();
+        SizeChanged += (_, _) => UpdateTodayClassesHeight();
+    }
+
+    private void UpdateTodayClassesHeight()
+    {
+        var maxHeight = Bounds.Height / 4;
+        if (maxHeight > 0 && Math.Abs(TodayOverviewPanel.MaxHeight - maxHeight) > 0.5)
+            TodayOverviewPanel.MaxHeight = maxHeight;
     }
 
     /// <summary>

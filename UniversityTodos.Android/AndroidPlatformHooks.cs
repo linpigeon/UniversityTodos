@@ -25,6 +25,9 @@ internal static class AndroidPlatformHooks
         // 批改网：同上。
         PigaiLoginService.CookieReaderOverride = ReadPigaiCookie;
         PigaiLoginService.CookieClearOverride = ClearPigaiCookies;
+
+        CredentialStore.ProtectOverride = AndroidCredentialProtection.Protect;
+        CredentialStore.UnprotectOverride = AndroidCredentialProtection.Unprotect;
     }
 
     /// <summary>读出 pigai.org 域的整条 Cookie（含 HttpOnly；PHPSESSID 必须在）。</summary>

@@ -23,7 +23,7 @@ public enum LoginPhase
 public sealed record LoginStatus(LoginPhase Phase, string Message);
 
 /// <summary>
-/// 通过内嵌 WebView 完成微信扫码登录。
+/// 通过内嵌 WebView 由用户手动完成扫码、账密或 Cookie 登录。
 /// <para>
 /// 做法：打开雨课堂的 iframe 登录页。该页面会把
 /// <c>/authorize/wx-qrlogin</c>（独立的二维码登录 SPA）嵌进 416×510 的 iframe，
@@ -81,7 +81,7 @@ public sealed class YktLoginService
     public YktLoginService(YktSessionOptions? options = null) => _options = options ?? new YktSessionOptions();
 
     /// <summary>
-    /// 在给定 WebView 上等待扫码完成。
+    /// 在给定 WebView 上等待微信授权或账密登录完成。
     /// <para>
     /// <b>必须从 UI 线程调用，并且本方法刻意不在 <c>await</c> 上用
     /// <c>ConfigureAwait(false)</c>。</b>
@@ -91,7 +91,7 @@ public sealed class YktLoginService
     /// 用 <c>ConfigureAwait(true)</c>（默认值）让循环始终回到 UI 线程。
     /// </para>
     /// </summary>
-    /// <param name="webView">已经显示在界面上的 WebView（调用方负责布局与可见性）。</param>
+    /// <param name="webView">已挂载的 WebView；可在后台隐藏，转人工时由调用方显示同一实例。</param>
     /// <param name="progress">登录进展回调。</param>
     /// <param name="pollInterval">页面内探测间隔。</param>
     /// <param name="timeout">整体超时。</param>
@@ -105,21 +105,27 @@ public sealed class YktLoginService
         TimeSpan? pollInterval = null,
         TimeSpan? timeout = null,
         Func<string, Task<bool>>? onProbe = null,
+        bool navigate = true,
+        PageReadyGate? pageGate = null,
         CancellationToken ct = default)
     {
         var interval = pollInterval ?? TimeSpan.FromSeconds(2.5);
         var limit = timeout ?? TimeSpan.FromMinutes(5);
         var deadline = DateTimeOffset.Now + limit;
 
-        progress?.Report(new LoginStatus(LoginPhase.LoadingPage, "正在打开长江雨课堂登录页…"));
-        try
+        progress?.Report(new LoginStatus(LoginPhase.LoadingPage,
+            navigate ? "正在打开长江雨课堂登录页…" : "正在等待雨课堂登录…"));
+        if (navigate)
         {
-            webView.Navigate(new Uri(LoginUrl));
-        }
-        catch (Exception ex)
-        {
-            progress?.Report(new LoginStatus(LoginPhase.Failed, $"无法打开登录页：{ex.Message}"));
-            return null;
+            try
+            {
+                webView.Navigate(new Uri(LoginUrl));
+            }
+            catch (Exception ex)
+            {
+                progress?.Report(new LoginStatus(LoginPhase.Failed, $"无法打开登录页：{ex.Message}"));
+                return null;
+            }
         }
 
         var reported = LoginPhase.LoadingPage;
@@ -128,13 +134,12 @@ public sealed class YktLoginService
         while (DateTimeOffset.Now < deadline)
         {
             ct.ThrowIfCancellationRequested();
-            // 回到 UI 线程再碰 WebView。
             await Task.Delay(interval, ct).ConfigureAwait(true);
+            if (pageGate is { HasCompletedNavigation: false }) continue;
 
-            var status = await TryProbeAsync(webView, ct).ConfigureAwait(true);
+            var status = await TryProbeAsync(webView, ct, pageGate).ConfigureAwait(true);
             if (status is null)
             {
-                // 页面正在跳转、适配器尚未就绪，或这次探测超时——等下一轮。
                 continue;
             }
 
@@ -142,7 +147,6 @@ public sealed class YktLoginService
 
             if (status == "200")
             {
-                // ReadSessionAsync 同样只能在 UI 线程上调用。
                 var session = await ReadSessionAsync(webView, _options.UniversityId, _options.Term)
                     .ConfigureAwait(true);
                 if (session is null)
@@ -156,8 +160,6 @@ public sealed class YktLoginService
                 return session;
             }
 
-            // 非 200：给调用方一个「立即处理」的机会（用于点按钮时跳过等待间隔）。
-            // 返回 true 表示调用方已接管，循环结束。
             if (onProbe is not null && await onProbe(status).ConfigureAwait(true))
             {
                 return null;
@@ -166,7 +168,6 @@ public sealed class YktLoginService
             if (reported != LoginPhase.WaitingForScan)
             {
                 reported = LoginPhase.WaitingForScan;
-                // Android 上登录页已自动切到账号表单（手机就是微信本体，扫不了自己的码）。
                 progress?.Report(new LoginStatus(LoginPhase.WaitingForScan,
                     OperatingSystem.IsAndroid()
                         ? "请在上方页面登录（手机号/短信/邮箱均可）…"
@@ -174,7 +175,6 @@ public sealed class YktLoginService
             }
             else if (probes % 12 == 0)
             {
-                // 让等待过程可见，否则界面看起来像卡死了。
                 var left = Math.Max(0, (int)(deadline - DateTimeOffset.Now).TotalMinutes);
                 progress?.Report(new LoginStatus(LoginPhase.WaitingForScan,
                     OperatingSystem.IsAndroid()
@@ -204,8 +204,10 @@ public sealed class YktLoginService
     /// </para>
     /// </summary>
     /// <returns>拿到状态码时返回该字符串；超时或未就绪时返回 null。</returns>
-    public static async Task<string?> TryProbeAsync(NativeWebView webView, CancellationToken ct = default)
+    public static async Task<string?> TryProbeAsync(
+        NativeWebView webView, CancellationToken ct = default, PageReadyGate? pageGate = null)
     {
+        if (pageGate is { HasCompletedNavigation: false }) return null;
         var script = InvokeScriptAsync(webView);
         var delay = Task.Delay(ProbeTimeout, ct);
 
@@ -215,6 +217,7 @@ public sealed class YktLoginService
             // 脚本没赢：它内部已把异常吞成 null，但仍要标记为已观察，
             // 否则页面跳转导致的取消会在 GC 时变成「UNOBSERVED TASK」。
             script.Observe();
+            delay.Observe();
             return null;
         }
 

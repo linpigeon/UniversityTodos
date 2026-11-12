@@ -194,6 +194,197 @@ public static class JsonSelfTest
             }
         });
 
+        Check("完美校园电费响应解析", () =>
+        {
+            var json = """
+                {"code_":0,"body":"{\"roomlist\":[{\"roomfullname\":\"桃李园 1 栋 501\",\"roomverify\":\"room-1\",\"detaillist\":[{\"odd\":\"8.5\",\"use\":126.3,\"status\":1}]},{\"roomfullname\":\"缺少详情的房间\",\"roomverify\":\"room-2\"}]}"}
+                """;
+            var rooms = ElectricityJsonParser.ParseRoomList(json);
+            Assert(rooms is { Count: 1 }
+                   && rooms[0].RoomVerify == "room-1"
+                   && rooms[0].Odd == 8.5
+                   && rooms[0].Use == 126.3
+                   && rooms[0].StatusText == "正常",
+                "电费房间、数值或状态解析不符");
+            Assert(ElectricityJsonParser.ParseRoomList("not-json") is null,
+                "非法响应应返回失败，不能伪造余额 0");
+        });
+
+        Check("水费表格：最近账期提取与冷热水排序", () =>
+        {
+            var json = """
+                [
+                  ["105","313","冷水","2026/06/25","2026/09/29","17","46.75"],
+                  ["106","313","热水","2026/06/25","2026/09/29","9","214.20"],
+                  ["104","313","热水","2026/05/26","2026/06/25","7","166.60"]
+                ]
+                """;
+            var bills = WaterService.ParseTableJson(json);
+            Assert(bills.Count == 2
+                   && bills[0].WaterType == "冷水" && bills[0].Fee == 46.75
+                   && bills[1].WaterType == "热水" && bills[1].Fee == 214.20
+                   && bills.All(b => b.EndDate == "2026/09/29"),
+                "水费最近账期或冷热水顺序解析不符");
+            Assert(bills.Sum(b => b.Fee) == 260.95, "水费合计不符");
+            Assert(WaterService.ParseTablePageJson(json).Count == 3,
+                "往期分页读取必须保留当前页的全部账期");
+        });
+
+        Check("水费账期：按学期拆分并跨页去重", () =>
+        {
+            var start = new DateOnly(2026, 9, 7);
+            var end = new DateOnly(2026, 11, 9);
+            var bills = new List<WaterBill>
+            {
+                new() { Sequence = 1, WaterType = "冷水", StartDate = "2026/06/25", EndDate = "2026/09/29", Usage = 17, Fee = 46.75 },
+                new() { Sequence = 2, WaterType = "热水", StartDate = "2026/06/25", EndDate = "2026/09/29", Usage = 9, Fee = 214.20 },
+                new() { Sequence = 3, WaterType = "冷水", StartDate = "2026/05/26", EndDate = "2026/06/25", Usage = 7, Fee = 166.60 },
+                new() { Sequence = 4, WaterType = "冷水", StartDate = "2026/09/01", EndDate = "2026/09/07", Usage = 1, Fee = 2.75 },
+            };
+
+            var filtered = WaterService.FilterBySemester(bills, start, end);
+            Assert(filtered.Count == 3 && filtered.All(b => b.EndDate != "2026/06/25"),
+                "旧学期账期必须排除，跨期但本学期结束的账期可以保留");
+            Assert(WaterService.FilterBySemester(bills.Take(2).ToList(), start, end).Count == 2,
+                "本学期冷热水记录应全部保留");
+            Assert(filtered.Any(b => b.Sequence == 4),
+                "学期第一周周一当天结束的账期应归入本学期");
+            Assert(WaterService.FilterBySemester(bills.Skip(2).Take(1).ToList(), start, end).Count == 0,
+                "只有旧学期账单时应返回空结果，而不是继续查询或回退登录");
+            Assert(WaterService.FilterBySemester(bills, null, end).Count == bills.Count,
+                "未配置学期开始日时应保持最近账期行为");
+            var history = WaterService.FilterHistoryBySemester(bills, start);
+            Assert(history.Count == 1 && history[0].Sequence == 3,
+                "往期只能包含学期第一周周一之前结束的账期");
+            Assert(WaterService.FilterHistoryBySemester(bills, null).Count == 0,
+                "未配置学期开始日时不应猜测往期边界");
+            var activeBill = new WaterBill
+            {
+                Sequence = 5, WaterType = "热水", StartDate = "2026/09/29",
+                EndDate = "2026/11/25", Usage = 3, Fee = 71.40,
+            };
+            var currentSemester = WaterService.FilterBySemester(
+                bills.Append(activeBill).ToList(), new DateOnly(2026, 8, 31), null);
+            Assert(currentSemester.Count == 4 && currentSemester.Any(b => b.Sequence == 5),
+                "2026-08-31 开学后的在途账期不得因结束日晚于今天而被丢弃");
+            Assert(WaterService.FilterHistoryBySemester(
+                    bills.Append(activeBill).ToList(), new DateOnly(2026, 8, 31)).Count == 1,
+                "在途账期不得同时落入往期");
+            var merged = WaterService.MergeBills(bills.Concat(bills.Take(2)));
+            Assert(merged.Count == bills.Count && merged[0].EndDate == "2026/09/29",
+                "跨页重复记录必须去重，并按账期由近到远排列");
+        });
+
+        Check("教务考试 JSON：字段、时间、可选值与分页参数", () =>
+        {
+            var json = """
+                {
+                  "currentPage": 1, "totalCount": 3, "totalPage": 2,
+                  "items": [
+                    {
+                      "kcmc":"示例课程","kch":"B0000001","ksmc":"2025-2026-2学期期末考试",
+                      "kssj":"2026-07-08(13:30-15:30)","cdmc":"博文楼E202","cdxqmc":"珠海",
+                      "ksfs":"笔试","zwh":"49","jxbmc":"(2025-2026-2)-B0000001-03",
+                      "kkxy":"示例学院","cxbj":"否"
+                    },
+                    {
+                      "kcmc":"另一课程","kssj":"2026-07-01(08:00-10:00)",
+                      "cdmc":"博文楼D202","xqmc":"珠海","zwh":""
+                    },
+                    {"kcmc":"时间待定课程","kssj":"待定"}
+                  ]
+                }
+                """;
+            var page = ExamService.ParsePage(json, 2025, 2);
+            Assert(page.Items.Count == 2 && page.TotalCount == 3 && page.TotalPages == 2,
+                "考试分页计数或有效记录解析不符");
+            Assert(page.Items[0].CourseName == "示例课程"
+                   && page.Items[0].StartAt == new DateTime(2026, 7, 8, 13, 30, 0)
+                   && page.Items[0].EndAt == new DateTime(2026, 7, 8, 15, 30, 0)
+                   && page.Items[0].SeatNumber == "49" && page.Items[0].ExamMethod == "笔试",
+                "考试课程、时间、地点、座号或方式映射不符");
+            Assert(page.Items[1].ExamMethod.Length == 0 && page.Items[1].Campus == "珠海",
+                "缺失考试方式应允许为空，校区应能回退到 xqmc");
+            var script = ExamService.BuildFetchScript(2025, 2, 2);
+            Assert(script.Contains("p.set('xnm','2025')") && script.Contains("p.set('xqm','12')")
+                   && script.Contains("p.set('queryModel.currentPage','2')")
+                   && script.Contains("p.set('queryModel.showCount','100')"),
+                "考试请求学年、学期、页码或页大小参数不符");
+            Assert(ExamService.SemesterCode(1) == "3" && ExamService.SemesterCode(3) == "16",
+                "教务学期代码映射不符");
+            Assert(!ExamService.TryParseExamTime("待定", out _, out _)
+                   && !ExamService.TryParseExamTime("2026-07-08(15:30-13:30)", out _, out _),
+                "非法或倒置的考试时间必须拒绝");
+            var empty = ExamService.ParsePage("""{"items":[],"totalCount":0,"totalPage":0}""", 2026, 1);
+            Assert(empty.Items.Count == 0 && empty.TotalCount == 0,
+                "空学期是正常结果，不能伪造考试或报错");
+            Assert(ExamService.BuildExamPageUrl("https://jw.example.edu.cn/xtgl/index_initMenu.html")
+                   == "https://jw.example.edu.cn/kwgl/kscx_cxXsksxxIndex.html?gnmkdm=N358105&layout=default",
+                "考试页应复用教务配置的主机地址");
+            Assert(DataBackupService.BusinessFiles.Contains("exams.json"), "考试缓存必须纳入数据备份");
+        });
+
+        Check("教务成绩：字段解析与全学年学分统计", () =>
+        {
+            var json = """
+                {
+                  "totalPage": 2,
+                  "items": [
+                    {"xnm":"2025","xqmmc":"2","kch":"C1","kcmc":"课程一","kcxzmc":"必修课",
+                     "xf":"2.0","cj":"92","bfzcj":"92","jd":"4.00","xfjd":"8.00",
+                     "khfsmc":"考试","ksxz":"正常考试","jsxm":"教师甲","kkbmmc":"学院甲","cjsfzf":"否"},
+                    {"xnm":"2025","xqmmc":"2","kch":"C2","kcmc":"课程二","xf":"3.0",
+                     "cj":"优秀","bfzcj":"95","jd":"4.00","xfjd":"12.00","cjsfzf":"否"},
+                    {"xnm":"2025","xqmmc":"2","kch":"C3","kcmc":"课程三","xf":"1.0",
+                     "cj":"不合格","bfzcj":"55","jd":"0.00","xfjd":"0.00","cjsfzf":"否"},
+                    {"xnm":"2025","xqmmc":"2","kch":"C4","kcmc":"作废课程","xf":"5.0",
+                     "cj":"80","bfzcj":"80","jd":"4.00","xfjd":"20.00","cjsfzf":"是"}
+                  ]
+                }
+                """;
+            var page = GradeService.ParseGradePage(json, 2025, 2);
+            Assert(page.Items.Count == 4 && page.TotalPages == 2,
+                "成绩分页或记录数解析不符");
+            Assert(page.Items[0].CourseName == "课程一" && page.Items[0].Credits == 2
+                   && page.Items[0].PercentScore == 92 && page.Items[0].CreditPoint == 8
+                   && page.Items[0].Assessment == "考试" && page.Items[0].Teacher == "教师甲",
+                "成绩、学分、绩点或课程字段映射不符");
+            Assert(page.Items[1].GradeText == "优秀" && page.Items[1].PercentScore == 95,
+                "文字成绩与百分制成绩应分别保留");
+            var stats = GradeService.ComputeStats(page.Items);
+            Assert(stats.EarnedCredits == 5,
+                $"已获学分应只统计及格且未作废课程，实际 {stats.EarnedCredits}");
+            Assert(stats.WeightedGradePoint == 3.33,
+                $"加权平均绩点应为 3.33，实际 {stats.WeightedGradePoint}");
+            Assert(stats.AverageScore == 80.67,
+                $"百分制平均分应为 80.67，实际 {stats.AverageScore}");
+            var script = GradeService.BuildFetchScript("/cjcx/cjcx_cxXsgrcj.html?doType=query&gnmkdm=N305005",
+                new Dictionary<string, string> { ["xnm"] = "", ["xqm"] = "" }, 2);
+            Assert(script.Contains("p.set(\"xnm\",\"\");") && script.Contains("p.set(\"xqm\",\"\");")
+                   && script.Contains("queryModel.currentPage','2'"),
+                "全学年成绩查询应保留空学年学期并正确翻页");
+            const string planJson = """
+                {"items":[
+                  {"jg_id":"1","njdm":"2025","dlbs":"1","zyh_id":"other","zdxf":"1","kcs":"76"},
+                  {"jg_id":"1","njdm":"2025","dlbs":"1","zyh_id":"major","zdxf":"165","kcs":"91"},
+                  {"jg_id":"1","njdm":"2024","dlbs":"1","zyh_id":"major","zdxf":"170","kcs":"100"}
+                ]}
+                """;
+            var plan = GradeService.ParsePlanPage(planJson, new Dictionary<string, string>
+            {
+                ["jg_id"] = "1", ["njdm_id"] = "2025", ["dlbs"] = "1", ["zyh_id"] = "major",
+            });
+            Assert(plan.MinimumCredits == 165 && plan.CourseCount == 91,
+                "执行计划必须按页面当前专业与年级唯一匹配，不能直接取全校列表第一行");
+            AssertThrows<InvalidOperationException>(() => GradeService.ParsePlanPage(planJson,
+                    new Dictionary<string, string> { ["zyh_id"] = "major" }),
+                "筛选项不足导致多个执行计划时必须拒绝猜测");
+            AssertThrows<InvalidOperationException>(() => GradeService.ParsePlanPage(planJson,
+                    new Dictionary<string, string> { ["zyh_id"] = "missing" }),
+                "没有匹配执行计划时不得回退到其它专业");
+            Assert(DataBackupService.BusinessFiles.Contains("grades.json"), "成绩缓存必须纳入数据备份");
+        });
+
         // ---- 本地持久化：走真实 Store（含 DPAPI 信封），落盘到临时目录 ----
 
         var tempDir = Path.Combine(Path.GetTempPath(), "hw-jsoncheck-" + Guid.NewGuid().ToString("N"));
@@ -217,6 +408,458 @@ public static class JsonSelfTest
                        && loaded.CsrfToken == "csrf-abc"
                        && loaded.UserName == "张三",
                     "会话文件往返不符");
+            });
+
+            Check("ElectricityCacheStore 往返", () =>
+            {
+                var store = new ElectricityCacheStore(tempDir);
+                var syncedAt = new DateTimeOffset(2026, 11, 7, 10, 30, 0, TimeSpan.FromHours(8));
+                store.SaveAsync(new ElectricityCacheFile
+                {
+                    SyncedAt = syncedAt,
+                    Rooms =
+                    [
+                        new ElectricityRoom
+                        {
+                            RoomName = "桃李园 1 栋 501", RoomVerify = "room-1",
+                            Odd = 8.5, Use = 126.3, Status = 1,
+                        },
+                    ],
+                }).GetAwaiter().GetResult();
+                var loaded = store.LoadAsync().GetAwaiter().GetResult();
+                Assert(loaded.SyncedAt == syncedAt && loaded.Rooms.Count == 1
+                       && loaded.Rooms[0].RoomVerify == "room-1"
+                       && loaded.Rooms[0].Odd == 8.5,
+                    "电费缓存往返不符");
+            });
+
+            Check("WaterCacheStore 往返", () =>
+            {
+                var store = new WaterCacheStore(tempDir);
+                var waterSyncedAt = new DateTimeOffset(2026, 11, 7, 11, 0, 0, TimeSpan.FromHours(8));
+                store.SaveAsync(new WaterCacheFile
+                {
+                    SyncedAt = waterSyncedAt,
+                    LatestBills =
+                    [
+                        new WaterBill
+                        {
+                            Sequence = 105, RoomNumber = "313", WaterType = "冷水",
+                            StartDate = "2026/06/25", EndDate = "2026/09/29",
+                            Usage = 17, Fee = 46.75,
+                        },
+                        new WaterBill
+                        {
+                            Sequence = 106, RoomNumber = "313", WaterType = "热水",
+                            StartDate = "2026/06/25", EndDate = "2026/09/29",
+                            Usage = 9, Fee = 214.20,
+                        },
+                    ],
+                    HistoryBills =
+                    [
+                        new WaterBill
+                        {
+                            Sequence = 104, RoomNumber = "313", WaterType = "冷水",
+                            StartDate = "2026/05/26", EndDate = "2026/06/25",
+                            Usage = 12, Fee = 33.00,
+                        },
+                    ],
+                }).GetAwaiter().GetResult();
+                var loaded = store.LoadAsync().GetAwaiter().GetResult();
+                Assert(loaded.SyncedAt == waterSyncedAt && loaded.LatestBills.Count == 2
+                       && loaded.LatestBills.Sum(b => b.Fee) == 260.95
+                       && loaded.HistoryBills.Count == 1
+                       && loaded.HistoryBills[0].Sequence == 104,
+                    "本学期与往期水费缓存往返不符");
+            });
+
+            Check("水费 ViewModel 按学期保存并保留往期缓存", () =>
+            {
+                var previousStart = AppSettings.Current.TermStartDate;
+                try
+                {
+                    AppSettings.Current.TermStartDate = "2026-09-07";
+                    var store = new WaterCacheStore(Path.Combine(tempDir, "water-history"));
+                    var vm = new WaterViewModel(store);
+                    var current = new WaterBill
+                    {
+                        Sequence = 2, RoomNumber = "313", WaterType = "热水",
+                        StartDate = "2026/09/01", EndDate = "2026/09/07", Usage = 2, Fee = 47.60,
+                    };
+                    var history = new WaterBill
+                    {
+                        Sequence = 1, RoomNumber = "313", WaterType = "冷水",
+                        StartDate = "2026/08/01", EndDate = "2026/09/06", Usage = 8, Fee = 22.00,
+                    };
+                    vm.SaveAsync([current, history], includeHistory: true).GetAwaiter().GetResult();
+                    Assert(vm.LatestBills.Count == 1 && vm.HistoryBills.Count == 1,
+                        "保存时必须按学期第一周周一拆分当前与往期账单");
+                    vm.ShowHistory = true;
+                    Assert(vm.ShowHistoryBills && vm.HistoryCountText == "1 条往期账单",
+                        "往期开关应控制已缓存账单的可见性");
+
+                    vm.SaveAsync([current]).GetAwaiter().GetResult();
+                    var persisted = store.LoadAsync().GetAwaiter().GetResult();
+                    Assert(persisted.LatestBills.Count == 1 && persisted.HistoryBills.Count == 1,
+                        "只刷新本学期账单时不得清除往期缓存");
+                    var restored = new WaterViewModel(store) { ShowHistory = true };
+                    restored.LoadAsync().GetAwaiter().GetResult();
+                    Assert(restored.LatestBills.Count == 1 && restored.HistoryBills.Count == 1
+                           && restored.ShowHistoryBills,
+                        "冷启动后应能同时恢复本学期与往期水费缓存");
+                    AppSettings.Current.TermStartDate = "2026-09-01";
+                    var reclassified = new WaterViewModel(store) { ShowHistory = true };
+                    reclassified.LoadAsync().GetAwaiter().GetResult();
+                    Assert(reclassified.LatestBills.Count == 2 && reclassified.HistoryBills.Count == 0,
+                        "修改学期第一周周一后应按新边界重新归类旧缓存");
+                }
+                finally
+                {
+                    AppSettings.Current.TermStartDate = previousStart;
+                }
+            });
+
+            Check("考试缓存往返与分学期切换", () =>
+            {
+                var store = new ExamCacheStore(Path.Combine(tempDir, "exam-history"));
+                var vm = new ExamInfoViewModel(store)
+                {
+                    AcademicYear = 2025,
+                    SemesterIndex = 1,
+                };
+                var oldExam = new ExamInfo
+                {
+                    AcademicYear = 2025, Semester = 2, CourseName = "往期考试课程",
+                    CourseCode = "B0000001", Location = "博文楼E202", SeatNumber = "49",
+                    StartAt = new DateTime(2026, 7, 8, 13, 30, 0),
+                    EndAt = new DateTime(2026, 7, 8, 15, 30, 0),
+                };
+                vm.SaveAsync([oldExam]).GetAwaiter().GetResult();
+                Assert(vm.HasItems && vm.Items[0].SeatText == "座号 49"
+                       && vm.TermText == "2025-2026 学年第 2 学期",
+                    "考试缓存或学期文案不符");
+
+                vm.AcademicYear = 2026;
+                vm.SemesterIndex = 0;
+                Assert(!vm.HasItems && vm.ShowEmpty, "切换到无缓存学期时应显示空状态");
+                Assert(vm.StatusMessage.Contains("2026-2027 学年第 1 学期", StringComparison.Ordinal)
+                       && !vm.StatusMessage.Contains("2025-2026 学年第 2 学期", StringComparison.Ordinal),
+                    "切换学期后不得残留上学期的状态提示");
+                vm.SaveAsync([
+                    new ExamInfo
+                    {
+                        AcademicYear = 2026, Semester = 1, CourseName = "本学期考试课程",
+                        StartAt = new DateTime(2026, 12, 20, 9, 0, 0),
+                        EndAt = new DateTime(2026, 12, 20, 11, 0, 0),
+                    },
+                ]).GetAwaiter().GetResult();
+                var persisted = store.LoadAsync().GetAwaiter().GetResult();
+                Assert(persisted.Items.Count == 2 && persisted.SyncedAt is not null,
+                    "更新一个学期时不得删除其它学期的考试缓存");
+                vm.AcademicYear = 2025;
+                vm.SemesterIndex = 1;
+                Assert(vm.HasItems && vm.Items[0].CourseName == "往期考试课程",
+                    "切回学期后应立即显示已有缓存");
+                Assert(vm.StatusMessage.Contains("2025-2026 学年第 2 学期", StringComparison.Ordinal)
+                       && vm.StatusMessage.Contains("1 场考试", StringComparison.Ordinal),
+                    "切回有缓存学期后应同步更新考试数量与学期提示");
+                vm.AcademicYear = 2025;
+                vm.SemesterIndex = 1;
+                vm.SaveAsync([oldExam]).GetAwaiter().GetResult();
+                var restored = new ExamInfoViewModel(store)
+                {
+                    AcademicYear = 2026,
+                    SemesterIndex = 0,
+                };
+                restored.LoadAsync().GetAwaiter().GetResult();
+                Assert(restored.AcademicYear == 2025 && restored.Semester == 2
+                       && restored.HasItems && restored.Items[0].CourseName == "往期考试课程",
+                    "冷启动后应恢复最后查询学期，而不是系统当前学期");
+            });
+
+            Check("成绩缓存往返与分学期筛选", () =>
+            {
+                var store = new GradeCacheStore(Path.Combine(tempDir, "grade-history"));
+                var vm = new GradeInfoViewModel(store)
+                {
+                    AcademicYear = 2025,
+                    SemesterIndex = 1,
+                };
+                var stats = new AcademicStats
+                {
+                    MinimumGraduationCredits = 165,
+                    PlannedCourseCount = 91,
+                    EarnedCredits = 80,
+                    WeightedGradePoint = 3.5,
+                    AverageScore = 85.5,
+                };
+                vm.SaveAsync([
+                    new GradeInfo
+                    {
+                        AcademicYear = 2025, Semester = 2, CourseCode = "C1",
+                        CourseName = "缓存课程", Credits = 2, GradeText = "92",
+                        PercentScore = 92, GradePoint = 4, CreditPoint = 8,
+                    },
+                ], stats).GetAwaiter().GetResult();
+                Assert(vm.HasItems && vm.MinimumGraduationCreditsText == "165 学分"
+                       && vm.PlannedCourseCountText == "91 门"
+                       && vm.EarnedCreditsText == "80 学分"
+                       && vm.WeightedGradePointText == "3.50"
+                       && vm.AverageScoreText == "85.5 分"
+                       && vm.RemainingCreditsText == "85 学分",
+                    "毕业要求、计划课程、已获学分、绩点或平均分显示不符");
+                vm.SemesterIndex = 0;
+                Assert(!vm.HasItems && vm.ShowEmpty, "切换到无成绩学期时应显示空状态");
+                var restored = new GradeInfoViewModel(store)
+                {
+                    AcademicYear = 2026,
+                    SemesterIndex = 0,
+                };
+                var changed = new List<string>();
+                restored.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName is not null) changed.Add(e.PropertyName);
+                };
+                restored.LoadAsync().GetAwaiter().GetResult();
+                Assert(restored.AcademicYear == 2025 && restored.Semester == 2
+                       && restored.HasItems && restored.Items[0].CourseName == "缓存课程"
+                       && restored.Stats.PlannedCourseCount == 91,
+                    "冷启动后应恢复最后查询学期的成绩与统计缓存");
+                string[] statProperties =
+                [
+                    nameof(GradeInfoViewModel.MinimumGraduationCreditsText),
+                    nameof(GradeInfoViewModel.PlannedCourseCountText),
+                    nameof(GradeInfoViewModel.EarnedCreditsText),
+                    nameof(GradeInfoViewModel.WeightedGradePointText),
+                    nameof(GradeInfoViewModel.AverageScoreText),
+                    nameof(GradeInfoViewModel.RemainingCreditsText),
+                ];
+                Assert(statProperties.All(changed.Contains),
+                    "统计缓存加载后必须通知全部六个界面文本更新，不能停留在初始零值");
+            });
+
+            Check("教务会话加密往返与恢复属性", () =>
+            {
+                var store = new JwSessionStore(Path.Combine(tempDir, "jw-session"));
+                store.SaveAsync(new JwSessionFile
+                {
+                    Cookies =
+                    [
+                        new JwSessionCookie
+                        {
+                            Name = "JSESSIONID", Value = "session-secret",
+                            Domain = ".example.edu.cn", Path = "/", Secure = true, HttpOnly = true,
+                        },
+                        new JwSessionCookie
+                        {
+                            Name = "route", Value = "node-a", Domain = "jw.example.edu.cn", Path = "/",
+                        },
+                    ],
+                }).GetAwaiter().GetResult();
+                var restored = store.LoadAsync().GetAwaiter().GetResult();
+                Assert(restored is not null && restored.Cookies.Count == 2
+                       && restored.Cookies[0].Value == "session-secret",
+                    "教务会话加密保存后应能完整恢复");
+                var cookie = JwSessionService.ToCookie(restored!.Cookies[0]);
+                Assert(cookie.HttpOnly && cookie.Secure && cookie.Expires > DateTime.UtcNow.AddDays(29),
+                    "原会话 Cookie 恢复时必须带持久有效期并保留安全属性");
+                Assert(JwSessionService.MatchesHost("jw.example.edu.cn", ".example.edu.cn")
+                       && !JwSessionService.MatchesHost("notexample.edu.cn", "example.edu.cn"),
+                    "教务 Cookie 只能恢复到原学校域");
+                Assert(!File.ReadAllText(store.Location).Contains("session-secret", StringComparison.Ordinal),
+                    "教务会话文件不得明文保存 Cookie 值");
+                Assert(DataBackupService.BusinessFiles.Contains("jw-session.json"),
+                    "教务会话必须纳入数据备份");
+            });
+
+            Check("统一认证会话加密往返与恢复属性", () =>
+            {
+                var store = new WaterSessionStore(Path.Combine(tempDir, "water-session"));
+                store.SaveAsync(new WaterSessionFile
+                {
+                    Cookies =
+                    [
+                        new WaterSessionCookie
+                        {
+                            Name = "CASTGC", Value = "cas-secret", Domain = "sos.zcst.edu.cn",
+                            Path = "/", Secure = true, HttpOnly = true,
+                        },
+                        new WaterSessionCookie
+                        {
+                            Name = "JSESSIONID", Value = "water-secret", Domain = "mapp.zcst.edu.cn", Path = "/",
+                        },
+                    ],
+                }).GetAwaiter().GetResult();
+                var restored = store.LoadAsync().GetAwaiter().GetResult();
+                Assert(restored is not null && restored.Cookies.Count == 2
+                       && restored.Cookies[0].Value == "cas-secret",
+                    "统一认证会话加密保存后应能完整恢复");
+                var cookie = WaterSessionService.ToCookie(restored!.Cookies[0]);
+                Assert(cookie.HttpOnly && cookie.Secure && cookie.Expires > DateTime.UtcNow.AddDays(29),
+                    "统一认证会话 Cookie 恢复时必须带持久有效期并保留安全属性");
+                Assert(WaterSessionService.IsWaterDomain(".zcst.edu.cn")
+                       && WaterSessionService.MatchesHost("mapp.zcst.edu.cn", ".zcst.edu.cn")
+                       && !WaterSessionService.IsWaterDomain("jw.zcst.edu.cn"),
+                    "统一认证只能保存和恢复认证域、水费域及其共享父域 Cookie");
+                var encrypted = File.ReadAllText(store.Location);
+                Assert(!encrypted.Contains("cas-secret", StringComparison.Ordinal)
+                       && !encrypted.Contains("water-secret", StringComparison.Ordinal),
+                    "统一认证会话文件不得明文保存 Cookie 值");
+                Assert(DataBackupService.BusinessFiles.Contains("water-session.json"),
+                    "统一认证会话必须纳入数据备份");
+            });
+
+            Check("旧版考试与成绩缓存恢复最近学期", () =>
+            {
+                var examStore = new ExamCacheStore(Path.Combine(tempDir, "exam-legacy"));
+                examStore.SaveAsync(new ExamCacheFile
+                {
+                    Items =
+                    [
+                        new ExamInfo
+                        {
+                            AcademicYear = 2024, Semester = 2, CourseName = "较早学期",
+                            StartAt = new DateTime(2025, 6, 1, 9, 0, 0), EndAt = new DateTime(2025, 6, 1, 11, 0, 0),
+                        },
+                        new ExamInfo
+                        {
+                            AcademicYear = 2025, Semester = 2, CourseName = "最近学期",
+                            StartAt = new DateTime(2026, 7, 8, 9, 0, 0), EndAt = new DateTime(2026, 7, 8, 11, 0, 0),
+                        },
+                    ],
+                }).GetAwaiter().GetResult();
+                var exams = new ExamInfoViewModel(examStore) { AcademicYear = 2026, SemesterIndex = 0 };
+                exams.LoadAsync().GetAwaiter().GetResult();
+                Assert(exams.AcademicYear == 2025 && exams.Semester == 2 && exams.HasItems,
+                    "旧版考试缓存没有最后查询字段时应恢复最近的已有学期");
+
+                var gradeStore = new GradeCacheStore(Path.Combine(tempDir, "grade-legacy"));
+                gradeStore.SaveAsync(new GradeCacheFile
+                {
+                    Grades = [new GradeInfo { AcademicYear = 2025, Semester = 2, CourseName = "最近成绩" }],
+                }).GetAwaiter().GetResult();
+                var grades = new GradeInfoViewModel(gradeStore) { AcademicYear = 2026, SemesterIndex = 0 };
+                grades.LoadAsync().GetAwaiter().GetResult();
+                Assert(grades.AcademicYear == 2025 && grades.Semester == 2 && grades.HasItems,
+                    "旧版成绩缓存没有最后查询字段时应恢复最近的已有学期");
+            });
+
+            Check("电费缓存写入失败时保留界面旧数据", () =>
+            {
+                var dir = Path.Combine(tempDir, "electricity-save-failure");
+                var store = new ElectricityCacheStore(dir);
+                var syncedAt = new DateTimeOffset(2026, 11, 7, 10, 30, 0, TimeSpan.FromHours(8));
+                var oldRoom = new ElectricityRoom
+                {
+                    RoomName = "旧宿舍", RoomVerify = "room-old", Odd = 30, Use = 100, Status = 1,
+                };
+                store.SaveAsync(new ElectricityCacheFile
+                {
+                    Rooms = [oldRoom], SyncedAt = syncedAt,
+                }).GetAwaiter().GetResult();
+
+                var newRoom = new ElectricityRoom
+                {
+                    RoomName = "新宿舍", RoomVerify = "room-new", Odd = 8.5, Use = 126.3, Status = 1,
+                };
+                var vm = new ElectricityViewModel(new StubElectricityApi(newRoom), store)
+                {
+                    Account = "student",
+                };
+                vm.LoadAsync().GetAwaiter().GetResult();
+
+                using (new FileStream(store.Location, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    Assert(!vm.RefreshAsync().GetAwaiter().GetResult(),
+                        "缓存不可写时电费刷新应报告失败");
+                    Assert(vm.Rooms.Count == 1 && vm.Rooms[0].RoomVerify == oldRoom.RoomVerify
+                           && vm.SelectedRoom?.RoomVerify == oldRoom.RoomVerify
+                           && vm.LastUpdated == syncedAt,
+                        "缓存写入失败不应替换界面中的电费数据");
+                }
+
+                var persisted = store.LoadAsync().GetAwaiter().GetResult();
+                Assert(persisted.Rooms.Count == 1
+                       && persisted.Rooms[0].RoomVerify == oldRoom.RoomVerify
+                       && persisted.SyncedAt == syncedAt,
+                    "缓存写入失败不应破坏原电费缓存");
+            });
+
+            Check("水费缓存写入失败时保留界面旧数据", () =>
+            {
+                var dir = Path.Combine(tempDir, "water-save-failure");
+                var store = new WaterCacheStore(dir);
+                var syncedAt = new DateTimeOffset(2026, 11, 7, 11, 0, 0, TimeSpan.FromHours(8));
+                var oldBill = new WaterBill
+                {
+                    Sequence = 105, RoomNumber = "313", WaterType = "冷水",
+                    StartDate = "2026/06/25", EndDate = "2026/09/29", Usage = 17, Fee = 46.75,
+                };
+                store.SaveAsync(new WaterCacheFile
+                {
+                    LatestBills = [oldBill], SyncedAt = syncedAt,
+                }).GetAwaiter().GetResult();
+
+                var vm = new WaterViewModel(store);
+                vm.LoadAsync().GetAwaiter().GetResult();
+                var newBill = new WaterBill
+                {
+                    Sequence = 106, RoomNumber = "313", WaterType = "热水",
+                    StartDate = "2026/09/29", EndDate = "2026/11/07", Usage = 9, Fee = 214.20,
+                };
+
+                using (new FileStream(
+                    Path.Combine(dir, "water.json"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    Exception? failure = null;
+                    try
+                    {
+                        vm.SaveAsync([newBill]).GetAwaiter().GetResult();
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        failure = ex;
+                    }
+
+                    Assert(failure is not null, "测试应通过独占锁让水费缓存写入失败");
+                    Assert(vm.LatestBills.Count == 1
+                           && vm.LatestBills[0].Sequence == oldBill.Sequence
+                           && vm.LastUpdated == syncedAt
+                           && vm.TotalFee == oldBill.Fee,
+                        "缓存写入失败不应替换界面中的水费数据");
+                }
+
+                var persisted = store.LoadAsync().GetAwaiter().GetResult();
+                Assert(persisted.LatestBills.Count == 1
+                       && persisted.LatestBills[0].Sequence == oldBill.Sequence
+                       && persisted.SyncedAt == syncedAt,
+                    "缓存写入失败不应破坏原水费缓存");
+            });
+
+            Check("凭据加密保存 / 解密往返 / 清除", () =>
+            {
+                if (!CredentialStore.SupportsSecureStorage)
+                    throw new PlatformNotSupportedException("当前平台不支持安全凭据存储");
+                var store = new CredentialStore("test-credentials.json", tempDir);
+                store.SaveAsync(new CredentialFile
+                {
+                    Account = "sample-account",
+                    Password = "sample-secret",
+                }).GetAwaiter().GetResult();
+
+                var encrypted = File.ReadAllText(store.Location);
+                Assert(encrypted.Contains("\"protected\": true")
+                       && !encrypted.Contains("sample-account")
+                       && !encrypted.Contains("sample-secret"),
+                    "凭据文件不得包含明文账号或密码");
+                var loaded = store.LoadAsync().GetAwaiter().GetResult();
+                Assert(loaded is not null
+                       && loaded.Account == "sample-account"
+                       && loaded.Password == "sample-secret",
+                    "加密凭据解密往返不符");
+
+                store.ClearAsync().GetAwaiter().GetResult();
+                Assert(!File.Exists(store.Location), "清除后凭据文件不应存在");
             });
 
             Check("LocalStateStore 往返", () =>
@@ -1270,6 +1913,60 @@ public static class JsonSelfTest
             svc.ResetBaseline();
             var afterReset = svc.Observe(Result(("hw-1", "作业A")));
             Assert(afterReset.Count == 0, "重置基线后首次同步不应报新作业");
+        });
+
+        Check("电费提醒：基线 / 恢复后再次变低 / 重启去重", () =>
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "hw-electricity-reminder-" + Guid.NewGuid().ToString("N"));
+            var notifications = new List<AppNotification>();
+            try
+            {
+                using var svc = new ElectricityReminderService(
+                    _ => Task.FromResult<IReadOnlyList<ElectricityRoom>?>([]),
+                    () => 20.0,
+                    () => true,
+                    new RecordingNotifier(notifications),
+                    dir);
+                var low = new ElectricityRoom
+                {
+                    RoomName = "桃李园 1 栋 501", RoomVerify = "room-1", Odd = 8.5, Status = 1,
+                };
+
+                Assert(svc.ObserveAsync([low]).GetAwaiter().GetResult() == 0 && notifications.Count == 0,
+                    "首次低电量只应建立基线");
+                Assert(svc.ObserveAsync([low]).GetAwaiter().GetResult() == 0 && notifications.Count == 0,
+                    "持续低电量不应重复提醒");
+
+                var recovered = new ElectricityRoom
+                {
+                    RoomName = low.RoomName, RoomVerify = low.RoomVerify, Odd = 30, Status = 1,
+                };
+                Assert(svc.ObserveAsync([recovered]).GetAwaiter().GetResult() == 0,
+                    "充值恢复不应发低电量提醒");
+
+                var lowAgain = new ElectricityRoom
+                {
+                    RoomName = low.RoomName, RoomVerify = low.RoomVerify, Odd = 5, Status = 1,
+                };
+                Assert(svc.ObserveAsync([lowAgain]).GetAwaiter().GetResult() == 1
+                       && notifications.Count == 1
+                       && notifications[0].Body.Contains("5.00"),
+                    "恢复后再次变低应提醒一次");
+
+                using var restarted = new ElectricityReminderService(
+                    _ => Task.FromResult<IReadOnlyList<ElectricityRoom>?>([]),
+                    () => 20.0,
+                    () => true,
+                    new RecordingNotifier(notifications),
+                    dir);
+                Assert(restarted.ObserveAsync([lowAgain]).GetAwaiter().GetResult() == 0
+                       && notifications.Count == 1,
+                    "重启后不应重复提醒同一低电量状态");
+            }
+            finally
+            {
+                try { Directory.Delete(dir, recursive: true); } catch { }
+            }
         });
 
         // ---- issue #1（w3743 报告）的 5 项修复回归：离线假 API，不触网 ----
@@ -2506,10 +3203,14 @@ public static class JsonSelfTest
             Assert(editor.Rows[0] is { Period: 1, StartTime: "08:00", EndTime: "08:45" },
                 "载入后应保留原时间");
             Assert(!editor.IsDirty, "刚载入时不应是「有改动」");
+            Assert(editor.Rows[0].StartTimeValue == new TimeSpan(8, 0, 0)
+                   && editor.Rows[0].EndTimeValue == new TimeSpan(8, 45, 0),
+                "时间选择器应从既有 HH:mm 数据生成");
 
             // 改一行 → 变 dirty → 保存成功
-            editor.Rows[0].StartTime = "07:50";
-            Assert(editor.IsDirty, "改过时间后应标记为有改动");
+            editor.Rows[0].StartTimeValue = new TimeSpan(7, 50, 0);
+            Assert(editor.Rows[0].StartTime == "07:50" && editor.IsDirty,
+                "时间选择器应回写 HH:mm 并标记为有改动");
             Assert(editor.SaveAsync().GetAwaiter().GetResult(), "合法时间应保存成功");
             Assert(saved.Count == Timetable.DefaultPeriods.Count && saved[0].StartTime == "07:50",
                 "保存应把改动写出去");
@@ -3145,6 +3846,128 @@ public static class JsonSelfTest
                 "汇总时刻校验不符");
         });
 
+        Check("登录页面闸门：首次导航完成前禁止脚本", () =>
+        {
+            var gate = new PageReadyGate();
+            gate.MarkAdapterCreated();
+            Assert(!gate.HasCompletedNavigation,
+                "适配器创建不等于页面加载完成");
+
+            var ykt = YktLoginService.TryProbeAsync(null!, pageGate: gate).GetAwaiter().GetResult();
+            var pigai = PigaiLoginService.TryProbeAsync(null!, pageGate: gate).GetAwaiter().GetResult();
+            Assert(ykt is null && pigai is null,
+                "首次导航完成前必须直接返回，不得向 WebView 下发脚本");
+            var water = WaterService.WaitForLatestAsync(
+                null!, timeout: TimeSpan.FromMilliseconds(1), navigate: false, pageGate: gate)
+                .GetAwaiter().GetResult();
+            Assert(water is null,
+                "水费查询在首次导航完成前不得执行认证或表格脚本");
+            var exams = ExamService.FetchExamsAsync(
+                null!, gate, 2026, 1, timeout: TimeSpan.FromMilliseconds(1))
+                .GetAwaiter().GetResult();
+            Assert(!exams.Success,
+                "考试查询在首次导航完成前不得执行页面或接口脚本");
+            var grades = GradeService.FetchAsync(null!, gate, "https://jw.example.edu.cn", 2026, 1)
+                .GetAwaiter().GetResult();
+            Assert(!grades.Success,
+                "成绩查询在首次导航完成前不得执行页面或接口脚本");
+
+            gate.MarkReady();
+            Assert(gate.HasCompletedNavigation, "导航完成后应允许脚本");
+            gate.MarkNavigating();
+            Assert(!gate.HasCompletedNavigation, "再次跳转期间应暂停脚本");
+            gate.MarkReady();
+            gate.Reset();
+            Assert(!gate.HasCompletedNavigation, "适配器重建后必须重新等待首轮导航");
+        });
+
+        Check("普通 WebView 登录与账密后台回退", () =>
+        {
+            var expectedBackground = OperatingSystem.IsWindows();
+            var vm = new MainViewModel();
+
+            vm.OpenYktLogin();
+            Assert(vm.LoginPageOpen == "ykt" && !vm.LoginBackground && vm.LoginOverlayVisible,
+                "雨课堂必须直接显示普通 WebView 登录页");
+            vm.ShowManualLogin("ykt", "手动回退");
+            Assert(vm.LoginPageOpen == "ykt" && !vm.LoginBackground && vm.LoginOverlayVisible
+                   && vm.LoginStatusText == "手动回退",
+                "雨课堂回退必须保留当前提供方并显示原 WebView");
+            vm.CloseLoginPage();
+            Assert(vm.LoginPageOpen is null && !vm.LoginOverlayVisible && !vm.LoginBackground,
+                "关闭登录页应清理雨课堂登录状态");
+
+            vm.OpenWaterLogin();
+            Assert(vm.LoginPageOpen == "water" && !vm.LoginBackground && vm.LoginOverlayVisible,
+                "统一认证网页必须在账号登录覆盖层显示");
+            vm.ShowManualLogin("water", "统一认证手动登录");
+            Assert(vm.LoginPageOpen == "water" && vm.LoginOverlayVisible
+                   && vm.Water.StatusMessage == "统一认证手动登录",
+                "水费回退必须显示同一认证页面");
+            vm.CloseLoginPage();
+
+            vm.OpenChaoxingLogin(background: true);
+            Assert(vm.LoginPageOpen == "chaoxing"
+                   && vm.LoginBackground == expectedBackground
+                   && vm.LoginOverlayVisible == !expectedBackground,
+                "学习通后台登录状态不符");
+            vm.ShowManualLogin("chaoxing", "学习通手动回退");
+            Assert(vm.LoginPageOpen == "chaoxing" && vm.LoginOverlayVisible
+                   && vm.ChaoxingStatusText == "学习通手动回退",
+                "学习通回退必须显示当前登录页");
+            vm.CloseLoginPage();
+
+            vm.OpenPigaiWeChatLoginCommand.Execute(null);
+            Assert(vm.LoginPageOpen == "pigai" && vm.PigaiPreferWeChat
+                   && !vm.LoginBackground && vm.LoginOverlayVisible,
+                "批改网微信授权必须立即显示官方页面，不得后台自动点击");
+            vm.ShowManualLogin("pigai", "批改网手动回退");
+            Assert(vm.LoginPageOpen == "pigai" && vm.LoginOverlayVisible
+                   && vm.PigaiStatusText == "批改网手动回退",
+                "批改网回退必须显示当前登录页");
+            vm.OpenPigaiLogin();
+            Assert(vm.LoginPageOpen == "pigai" && vm.LoginOverlayVisible
+                   && !vm.LoginBackground && !vm.PigaiPreferWeChat,
+                "手动打开批改网应恢复账密登录模式");
+            vm.CloseLoginPage();
+        });
+
+        Check("批改网站点账密脚本：专用控件与完整密码注入", () =>
+        {
+            const string account = "user\"name";
+            const string password = " p@ss word ";
+            var script = PigaiLoginService.BuildCredentialLoginScript(account, password);
+            Assert(script.Contains("#username") && script.Contains("#password")
+                   && script.Contains("#ulogin"),
+                "批改网脚本必须使用站点专用账号、密码和登录按钮控件");
+            Assert(script.Contains(JsonSerializer.Serialize(account))
+                   && script.Contains(JsonSerializer.Serialize(password)),
+                "脚本注入必须保留完整账号密码并正确转义");
+        });
+
+        Check("电费阈值输入：null 使用默认值且不抛转换异常", () =>
+        {
+            var previous = AppSettings.Current.ElectricityLowBalanceThreshold;
+            try
+            {
+                var vm = new ElectricityViewModel();
+                vm.LowBalanceThresholdInput = null;
+                Assert(vm.LowBalanceThreshold == 20,
+                    "清空阈值输入后应使用 20 度默认值");
+                Assert(AppSettings.Current.ElectricityLowBalanceThreshold == 20,
+                    "空输入持久化时也应使用默认值");
+
+                vm.LowBalanceThresholdInput = 12.5;
+                Assert(vm.LowBalanceThreshold == 12.5,
+                    "有效阈值仍应原样生效");
+            }
+            finally
+            {
+                AppSettings.Current.ElectricityLowBalanceThreshold = previous;
+                AppSettings.Current.Save();
+            }
+        });
+
         Check("平台作业：按截止时间的 3/5/7 天边界自动划分优先级", () =>
         {
             var now = new DateTimeOffset(2026, 11, 4, 12, 0, 0, TimeSpan.FromHours(8));
@@ -3211,6 +4034,28 @@ public static class JsonSelfTest
             vm.OnNavChanged();
             Assert(vm.ListTitle == "学习通网课",
                 $"列表标题应跟随导航显示「学习通网课」，实际「{vm.ListTitle}」");
+        });
+
+        Check("导航：考试信息独立入口与返回路径", () =>
+        {
+            var vm = new MainViewModel();
+            vm.SelectedNav = vm.NavItems.Single(item => item.Key == "timetable");
+            vm.OnNavChanged();
+            Assert(vm.TimetableOpen && !vm.ExamInfoOpen, "进入考试前应先打开课表");
+            vm.SelectedNav = vm.NavItems.Single(item => item.Key == "exam-info");
+            vm.OnNavChanged();
+            Assert(vm.ExamInfoOpen && !vm.TimetableOpen && vm.SelectedNav.Key == "exam-info",
+                "考试信息必须是左侧栏独立页面");
+            vm.CloseExamInfo();
+            Assert(vm.TimetableOpen && !vm.ExamInfoOpen && vm.SelectedNav.Key == "timetable",
+                "从课表进入考试后应返回课表");
+            vm.SelectedNav = vm.NavItems[0];
+            vm.OnNavChanged();
+            vm.SelectedNav = vm.NavItems.Single(item => item.Key == "exam-info");
+            vm.OnNavChanged();
+            vm.CloseExamInfo();
+            Assert(!vm.ExamInfoOpen && !vm.TimetableOpen && vm.SelectedNav == vm.NavItems[0],
+                "从普通列表进入考试后应返回原列表");
         });
 
         Check("待办时间选择：空值、秒毫秒归零、下一个 30 分钟刻度", () =>
@@ -3595,6 +4440,13 @@ public static class JsonSelfTest
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromResult(respond(request, cancellationToken));
+    }
+
+    private sealed class StubElectricityApi(ElectricityRoom room) : IElectricityApi
+    {
+        public Task<List<ElectricityRoom>?> GetBoundRoomsAsync(
+            string account, CancellationToken ct = default)
+            => Task.FromResult<List<ElectricityRoom>?>([room]);
     }
 
     /// <summary>离线的 IYktApi：固定课程表 + 固定学习日志，进度/章节/详情为空。</summary>

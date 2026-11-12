@@ -1,0 +1,147 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UniversityTodos.ViewModels"
+             x:Class="UniversityTodos.Views.GradeInfoView"
+             x:DataType="vm:MainViewModel">
+  <ScrollViewer Margin="26,14,26,22">
+    <StackPanel Spacing="12">
+      <Border Background="{DynamicResource TodoSurface}" CornerRadius="6" Padding="16">
+        <StackPanel Spacing="12">
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Grid.Column="0" Text="{Binding GradeInfo.TermText}" FontSize="14"
+                       FontWeight="SemiBold" Foreground="{DynamicResource TodoTextPrimary}" />
+            <TextBlock Grid.Column="1" Text="{Binding GradeInfo.LastUpdatedText}" FontSize="11"
+                       Foreground="{DynamicResource TodoTextTertiary}" />
+          </Grid>
+          <WrapPanel Orientation="Horizontal">
+            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,14,8">
+              <TextBlock Text="学年" FontSize="12" VerticalAlignment="Center"
+                         Foreground="{DynamicResource TodoTextSecondary}" />
+              <NumericUpDown Minimum="2000" Maximum="2100" Increment="1" FormatString="0"
+                             Width="140" Value="{Binding GradeInfo.AcademicYear, Mode=TwoWay}"
+                             IsEnabled="{Binding !GradeInfo.IsLoading}" />
+            </StackPanel>
+            <ComboBox Width="120" Margin="0,0,14,8" SelectedIndex="{Binding GradeInfo.SemesterIndex, Mode=TwoWay}"
+                      IsEnabled="{Binding !GradeInfo.IsLoading}">
+              <ComboBoxItem Content="第 1 学期" />
+              <ComboBoxItem Content="第 2 学期" />
+              <ComboBoxItem Content="第 3 学期" />
+            </ComboBox>
+            <Button Classes="primary" Content="从教务获取" Padding="14,6" FontSize="12"
+                    Margin="0,0,0,8" Click="OnImportClick"
+                    IsEnabled="{Binding !GradeInfo.IsLoading}" />
+          </WrapPanel>
+          <TextBlock Text="成绩按学期筛选；学分与绩点统计使用全部学年成绩和专业执行计划。"
+                     FontSize="11" TextWrapping="Wrap"
+                     Foreground="{DynamicResource TodoTextTertiary}" />
+        </StackPanel>
+      </Border>
+
+      <WrapPanel Orientation="Horizontal">
+        <Border Background="{DynamicResource TodoSurface}" CornerRadius="6" Padding="14" Margin="0,0,8,8">
+          <StackPanel Spacing="3">
+            <TextBlock Text="最低毕业学分" FontSize="11" Foreground="{DynamicResource TodoTextSecondary}" />
+            <TextBlock Text="{Binding GradeInfo.MinimumGraduationCreditsText}" FontSize="19" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TodoAccent}" />
+          </StackPanel>
+        </Border>
+        <Border Background="{DynamicResource TodoSurface}" CornerRadius="6" Padding="14" Margin="0,0,8,8">
+          <StackPanel Spacing="3">
+            <TextBlock Text="计划课程数" FontSize="11" Foreground="{DynamicResource TodoTextSecondary}" />
+            <TextBlock Text="{Binding GradeInfo.PlannedCourseCountText}" FontSize="19" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TodoTextPrimary}" />
+          </StackPanel>
+        </Border>
+        <Border Background="{DynamicResource TodoSurface}" CornerRadius="6" Padding="14" Margin="0,0,8,8">
+          <StackPanel Spacing="3">
+            <TextBlock Text="已获学分" FontSize="11" Foreground="{DynamicResource TodoTextSecondary}" />
+            <TextBlock Text="{Binding GradeInfo.EarnedCreditsText}" FontSize="19" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TodoAccent}" />
+          </StackPanel>
+        </Border>
+        <Border Background="{DynamicResource TodoSurface}" CornerRadius="6" Padding="14" Margin="0,0,8,8">
+          <StackPanel Spacing="3">
+            <TextBlock Text="加权平均绩点" FontSize="11" Foreground="{DynamicResource TodoTextSecondary}" />
+            <TextBlock Text="{Binding GradeInfo.WeightedGradePointText}" FontSize="19" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TodoAccent}" />
+          </StackPanel>
+        </Border>
+        <Border Background="{DynamicResource TodoSurface}" CornerRadius="6" Padding="14" Margin="0,0,8,8">
+          <StackPanel Spacing="3">
+            <TextBlock Text="百分制平均分" FontSize="11" Foreground="{DynamicResource TodoTextSecondary}" />
+            <TextBlock Text="{Binding GradeInfo.AverageScoreText}" FontSize="19" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TodoAccent}" />
+          </StackPanel>
+        </Border>
+        <Border Background="{DynamicResource TodoSurface}" CornerRadius="6" Padding="14" Margin="0,0,8,8">
+          <StackPanel Spacing="3">
+            <TextBlock Text="距毕业要求还差" FontSize="11" Foreground="{DynamicResource TodoTextSecondary}" />
+            <TextBlock Text="{Binding GradeInfo.RemainingCreditsText}" FontSize="19" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TodoTextPrimary}" />
+          </StackPanel>
+        </Border>
+      </WrapPanel>
+
+      <TextBlock Text="{Binding GradeInfo.StatusMessage}" FontSize="12" TextWrapping="Wrap"
+                 Foreground="{DynamicResource TodoTextSecondary}" />
+      <ProgressBar IsIndeterminate="True" Height="3" IsVisible="{Binding GradeInfo.IsLoading}" />
+      <TextBlock Text="{Binding GradeInfo.CountText}" FontSize="12"
+                 IsVisible="{Binding GradeInfo.HasItems}"
+                 Foreground="{DynamicResource TodoTextSecondary}" />
+
+      <ItemsControl ItemsSource="{Binding GradeInfo.Items}">
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:GradeListItemViewModel">
+            <Border Background="{DynamicResource TodoSurface}" CornerRadius="6" Padding="16" Margin="0,2">
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="14">
+                <StackPanel Grid.Column="0" Spacing="6">
+                  <TextBlock Text="{Binding CourseName}" FontSize="15" FontWeight="SemiBold"
+                             TextWrapping="Wrap" Foreground="{DynamicResource TodoTextPrimary}" />
+                  <WrapPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding CreditsText}" FontSize="12" Margin="0,0,14,3"
+                               Foreground="{DynamicResource TodoTextSecondary}" />
+                    <TextBlock Text="{Binding GradePointText}" FontSize="12" Margin="0,0,14,3"
+                               Foreground="{DynamicResource TodoTextSecondary}" />
+                    <TextBlock Text="{Binding CreditPointText}" FontSize="12" Margin="0,0,14,3"
+                               Foreground="{DynamicResource TodoTextSecondary}" />
+                  </WrapPanel>
+                  <WrapPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding CourseNatureText}" FontSize="11" Margin="0,0,12,3"
+                               Foreground="{DynamicResource TodoTextTertiary}" />
+                    <TextBlock Text="{Binding AssessmentText}" FontSize="11" Margin="0,0,12,3"
+                               Foreground="{DynamicResource TodoTextTertiary}" />
+                    <TextBlock Text="{Binding CollegeText}" FontSize="11" Margin="0,0,12,3"
+                               Foreground="{DynamicResource TodoTextTertiary}" />
+                  </WrapPanel>
+                  <TextBlock Text="{Binding TeacherText}" FontSize="11"
+                             Foreground="{DynamicResource TodoTextTertiary}" />
+                  <TextBlock Text="{Binding CourseCodeText}" FontSize="11"
+                             Foreground="{DynamicResource TodoTextTertiary}" />
+                  <TextBlock Text="成绩已作废" FontSize="11" IsVisible="{Binding IsVoid}"
+                             Foreground="{DynamicResource TodoWarningBorder}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Spacing="3" HorizontalAlignment="Right">
+                  <TextBlock Text="{Binding PercentScoreText}" FontSize="21" FontWeight="SemiBold"
+                             Foreground="{DynamicResource TodoAccent}" />
+                  <TextBlock Text="{Binding GradeText}" FontSize="11"
+                             Foreground="{DynamicResource TodoTextTertiary}" />
+                </StackPanel>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <Border Background="{DynamicResource TodoSurface}" CornerRadius="6" Padding="24"
+              IsVisible="{Binding GradeInfo.ShowEmpty}">
+        <StackPanel Spacing="8">
+          <TextBlock Text="该学期暂无成绩" FontSize="14" FontWeight="SemiBold"
+                     HorizontalAlignment="Center" Foreground="{DynamicResource TodoTextPrimary}" />
+          <TextBlock Text="可切换学年、学期查看缓存，或点「从教务获取」读取最新成绩。"
+                     FontSize="12" TextWrapping="Wrap" TextAlignment="Center"
+                     Foreground="{DynamicResource TodoTextTertiary}" />
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

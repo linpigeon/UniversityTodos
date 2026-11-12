@@ -1,0 +1,142 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UniversityTodos.ViewModels"
+             xmlns:views="using:UniversityTodos.Views"
+             x:Class="UniversityTodos.Views.ExamInfoView"
+             x:DataType="vm:MainViewModel">
+  <Border Background="{DynamicResource TodoDialogBackground}">
+    <Grid RowDefinitions="Auto,*">
+      <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="26,20,26,0">
+        <StackPanel Grid.Column="0" Spacing="6">
+          <TextBlock Text="考试" FontSize="20" FontWeight="SemiBold"
+                     Foreground="{DynamicResource TodoTextPrimary}" />
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Classes="settab" Content="考试信息" Click="OnExamTabClick"
+                    Classes.selected="{Binding ExamScheduleActive}" />
+            <Button Classes="settab" Content="学分与成绩" Click="OnGradeTabClick"
+                    Classes.selected="{Binding GradeActive}" />
+          </StackPanel>
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+          <Button Classes="outline" Content="返回" Padding="10,5" FontSize="12"
+                  Click="OnCloseClick" />
+        </StackPanel>
+      </Grid>
+
+      <Grid Grid.Row="1">
+      <ScrollViewer IsVisible="{Binding ExamScheduleActive}" Margin="26,14,26,22">
+        <StackPanel Spacing="12">
+          <Border Background="{DynamicResource TodoSurface}" CornerRadius="6" Padding="16">
+            <StackPanel Spacing="12">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Column="0" Text="{Binding ExamInfo.TermText}" FontSize="14"
+                           FontWeight="SemiBold" Foreground="{DynamicResource TodoTextPrimary}" />
+                <TextBlock Grid.Column="1" Text="{Binding ExamInfo.LastUpdatedText}" FontSize="11"
+                           Foreground="{DynamicResource TodoTextTertiary}" />
+              </Grid>
+              <WrapPanel Orientation="Horizontal">
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,0,14,8">
+                  <TextBlock Text="学年" FontSize="12" VerticalAlignment="Center"
+                             Foreground="{DynamicResource TodoTextSecondary}" />
+                  <NumericUpDown Minimum="2000" Maximum="2100" Increment="1" FormatString="0"
+                                 Width="140" Value="{Binding ExamInfo.AcademicYear, Mode=TwoWay}"
+                                 IsEnabled="{Binding !ExamInfo.IsLoading}" />
+                </StackPanel>
+                <ComboBox Width="120" Margin="0,0,14,8" SelectedIndex="{Binding ExamInfo.SemesterIndex, Mode=TwoWay}"
+                          IsEnabled="{Binding !ExamInfo.IsLoading}">
+                  <ComboBoxItem Content="第 1 学期" />
+                  <ComboBoxItem Content="第 2 学期" />
+                  <ComboBoxItem Content="第 3 学期" />
+                </ComboBox>
+                <Button Classes="primary" Content="从教务获取" Padding="14,6" FontSize="12"
+                        Margin="0,0,0,8" Click="OnImportClick"
+                        IsEnabled="{Binding !ExamInfo.IsLoading}" />
+              </WrapPanel>
+              <TextBlock Text="复用教务系统登录状态，只读取考试安排；切换学期会先显示已有缓存。"
+                         FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoTextTertiary}" />
+            </StackPanel>
+          </Border>
+
+          <Border Background="{DynamicResource TodoAccentSoft}" CornerRadius="4" Padding="10,7">
+            <TextBlock Text="{Binding JwSessionStatus}" FontSize="11" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TodoTextSecondary}" />
+          </Border>
+          <TextBlock Text="{Binding ExamInfo.StatusMessage}" FontSize="12" TextWrapping="Wrap"
+                     Foreground="{DynamicResource TodoTextSecondary}" />
+          <ProgressBar IsIndeterminate="True" Height="3" IsVisible="{Binding ExamInfo.IsLoading}" />
+
+          <TextBlock Text="{Binding ExamInfo.CountText}" FontSize="12"
+                     IsVisible="{Binding ExamInfo.HasItems}"
+                     Foreground="{DynamicResource TodoTextSecondary}" />
+          <ItemsControl ItemsSource="{Binding ExamInfo.Items}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="vm:ExamListItemViewModel">
+                <Border Background="{DynamicResource TodoSurface}" CornerRadius="6"
+                        Padding="16" Margin="0,2">
+                  <StackPanel Spacing="9">
+                    <StackPanel Spacing="5">
+                      <TextBlock Text="{Binding CourseName}" FontSize="16" FontWeight="SemiBold"
+                                 TextWrapping="Wrap" Foreground="{DynamicResource TodoTextPrimary}" />
+                      <WrapPanel Orientation="Horizontal">
+                        <Border Background="{DynamicResource TodoAccentSoft}" CornerRadius="3"
+                                Padding="6,2" Margin="0,0,6,4">
+                          <TextBlock Text="{Binding ExamName}" FontSize="10"
+                                     Foreground="{DynamicResource TodoAccent}" />
+                        </Border>
+                        <Border Background="{DynamicResource TodoWarningBackground}" CornerRadius="3"
+                                Padding="6,2" Margin="0,0,6,4"
+                                IsVisible="{Binding RetakeText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                          <TextBlock Text="{Binding RetakeText}" FontSize="10"
+                                     Foreground="{DynamicResource TodoWarningBorder}" />
+                        </Border>
+                      </WrapPanel>
+                    </StackPanel>
+
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                      <TextBlock Grid.Column="0" Text="{Binding DateText}" FontSize="13"
+                                 FontWeight="SemiBold" Foreground="{DynamicResource TodoTextPrimary}" />
+                      <TextBlock Grid.Column="1" Text="{Binding TimeText}" FontSize="14"
+                                 FontWeight="SemiBold" Foreground="{DynamicResource TodoAccent}" />
+                    </Grid>
+                    <TextBlock Text="{Binding LocationText}" FontSize="13" TextWrapping="Wrap"
+                               Foreground="{DynamicResource TodoTextPrimary}" />
+                    <WrapPanel Orientation="Horizontal">
+                      <TextBlock Text="{Binding SeatText}" FontSize="12" Margin="0,0,16,4"
+                                 Foreground="{DynamicResource TodoTextSecondary}" />
+                      <TextBlock Text="{Binding MethodText}" FontSize="12" Margin="0,0,16,4"
+                                 Foreground="{DynamicResource TodoTextSecondary}" />
+                    </WrapPanel>
+                    <StackPanel Spacing="3">
+                      <TextBlock Text="{Binding CourseCodeText}" FontSize="11"
+                                 Foreground="{DynamicResource TodoTextTertiary}" />
+                      <TextBlock Text="{Binding TeachingClassText}" FontSize="11" TextWrapping="Wrap"
+                                 Foreground="{DynamicResource TodoTextTertiary}" />
+                      <TextBlock Text="{Binding CollegeText}" FontSize="11"
+                                 Foreground="{DynamicResource TodoTextTertiary}" />
+                      <TextBlock Text="{Binding RemarkText}" FontSize="11" TextWrapping="Wrap"
+                                 Foreground="{DynamicResource TodoTextTertiary}" />
+                    </StackPanel>
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <Border Background="{DynamicResource TodoSurface}" CornerRadius="6" Padding="24"
+                  IsVisible="{Binding ExamInfo.ShowEmpty}">
+            <StackPanel Spacing="8">
+              <TextBlock Text="该学期暂无考试信息" FontSize="14" FontWeight="SemiBold"
+                         HorizontalAlignment="Center" Foreground="{DynamicResource TodoTextPrimary}" />
+              <TextBlock Text="可切换学年、学期查看缓存，或点「从教务获取」读取最新安排。"
+                         FontSize="12" TextWrapping="Wrap" TextAlignment="Center"
+                         Foreground="{DynamicResource TodoTextTertiary}" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+      <views:GradeInfoView IsVisible="{Binding GradeActive}" />
+      </Grid>
+    </Grid>
+  </Border>
+</UserControl>

@@ -106,6 +106,8 @@
             <TextBlock Text="周末" FontSize="12" />
           </ToggleButton>
 
+          <Button Classes="outline" Content="考试信息" Padding="10,5" FontSize="12"
+                  Click="OnExamsClick" ToolTip.Tip="查看教务系统考试安排" />
           <Button Classes="primary" Content="导入课表" Padding="10,5" FontSize="12"
                   Click="OnImportClick" ToolTip.Tip="打开教务系统，登录后在课表页点悬浮球抓取" />
         </StackPanel>
@@ -115,7 +117,7 @@
     <!-- 移动紧凑头部（仅 CompactMode=true）：标题行 + 单行周次/开关控制。 -->
     <Grid Grid.Row="0" Classes="compact-header" RowDefinitions="Auto,Auto"
           IsVisible="{Binding Timetable.CompactMode}">
-      <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto">
+      <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto,Auto">
         <Button Grid.Column="0" Classes="tool" Click="OnCloseClick" ToolTip.Tip="返回待办">
           <TextBlock Classes="icon" Text="&#xF060;" />
         </Button>
@@ -126,7 +128,10 @@
                      FontSize="11" TextTrimming="CharacterEllipsis"
                      Foreground="{DynamicResource TodoTextSecondary}" />
         </StackPanel>
-        <Button Grid.Column="2" Classes="tool" Click="OnImportClick" ToolTip.Tip="导入课表">
+        <Button Grid.Column="2" Classes="tool" Click="OnExamsClick" ToolTip.Tip="考试信息">
+          <TextBlock Classes="icon" Text="&#xF073;" />
+        </Button>
+        <Button Grid.Column="3" Classes="tool" Click="OnImportClick" ToolTip.Tip="导入课表">
           <TextBlock Classes="icon" Text="&#xF019;" />
         </Button>
       </Grid>
@@ -225,10 +230,10 @@
                   <StackPanel Spacing="1">
                     <TextBlock Classes="day-name" Text="{Binding DayName}" FontWeight="SemiBold"
                                HorizontalAlignment="Center"
-                               IsVisible="{Binding !CompactMode, RelativeSource={RelativeSource AncestorType=views:TimetableView}}" />
+                               IsVisible="{Binding !CompactMode}" />
                     <TextBlock Classes="day-name day-name-compact" Text="{Binding ShortDayName}" FontWeight="SemiBold"
                                HorizontalAlignment="Center"
-                               IsVisible="{Binding CompactMode, RelativeSource={RelativeSource AncestorType=views:TimetableView}}" />
+                               IsVisible="{Binding CompactMode}" />
                     <TextBlock Classes="day-date" Text="{Binding DateText}"
                                IsVisible="{Binding HasDate}"
                                HorizontalAlignment="Center" />

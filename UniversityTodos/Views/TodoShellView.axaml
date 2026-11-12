@@ -69,29 +69,45 @@
       <views:TimetableView IsVisible="{Binding TimetableOpen}"
                            Classes.pagefadein="{Binding TimetableOpen}" />
 
+      <views:ElectricityView IsVisible="{Binding ElectricityOpen}"
+                             Classes.pagefadein="{Binding ElectricityOpen}" />
+
+      <views:ExamInfoView IsVisible="{Binding ExamInfoOpen}"
+                          Classes.pagefadein="{Binding ExamInfoOpen}" />
+
       <!-- 教务导入页：盖在课表页之上（从课表页的「导入课表」进入） -->
       <views:JwImportView IsVisible="{Binding JwImportOpen}"
                           Classes.pagefadein="{Binding JwImportOpen}" />
     </Grid>
 
     <!-- 登录覆盖层（雨课堂 / 学习通，从设置页「账号」进入；启动不再弹登录） -->
-    <Border Grid.Column="2" Background="{DynamicResource TodoDialogBackground}"
-            IsVisible="{Binding LoginPageOpen, Converter={x:Static ObjectConverters.IsNotNull}}">
-      <Grid RowDefinitions="Auto,*">
-        <Button Grid.Row="0" Classes="tool" Click="OnLoginBackClick"
-                Margin="10,10,0,0" HorizontalAlignment="Left"
-                ToolTip.Tip="返回设置">
-          <StackPanel Orientation="Horizontal" Spacing="6">
-            <TextBlock Classes="icon" Text="&#xF060;" />
-            <TextBlock Text="返回" FontSize="13" VerticalAlignment="Center"
-                       Foreground="{DynamicResource TodoTextSecondary}" />
-          </StackPanel>
-        </Button>
-        <Panel Grid.Row="1">
-          <views:LoginView IsVisible="{Binding YktLoginOpen}" />
-          <views:ChaoxingLoginView IsVisible="{Binding ChaoxingLoginOpen}" />
-          <views:PigaiLoginView IsVisible="{Binding PigaiLoginOpen}" />
-        </Panel>
+    <Border Grid.Column="2" Background="Transparent"
+            IsVisible="{Binding LoginHostVisible}"
+            IsHitTestVisible="True">
+      <Border.RenderTransform>
+        <TranslateTransform X="{Binding LoginOverlayOffsetX}" />
+      </Border.RenderTransform>
+      <Grid>
+        <Border Background="{DynamicResource TodoDialogBackground}"
+                IsVisible="{Binding !LoginBackgroundRequested}" />
+        <Grid RowDefinitions="Auto,*">
+          <Button Grid.Row="0" Classes="tool" Click="OnLoginBackClick"
+                  Margin="10,10,0,0" HorizontalAlignment="Left"
+                  IsVisible="{Binding !LoginBackgroundRequested}"
+                  ToolTip.Tip="返回设置">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <TextBlock Classes="icon" Text="&#xF060;" />
+              <TextBlock Text="返回" FontSize="13" VerticalAlignment="Center"
+                         Foreground="{DynamicResource TodoTextSecondary}" />
+            </StackPanel>
+          </Button>
+          <Panel Grid.Row="1">
+            <views:LoginView IsVisible="{Binding YktLoginOpen}" />
+            <views:ChaoxingLoginView IsVisible="{Binding ChaoxingLoginOpen}" />
+            <views:PigaiLoginView IsVisible="{Binding PigaiLoginOpen}" />
+            <views:WaterLoginView IsVisible="{Binding WaterLoginOpen}" />
+          </Panel>
+        </Grid>
       </Grid>
     </Border>
   </Grid>

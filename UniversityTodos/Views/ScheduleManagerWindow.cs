@@ -71,8 +71,16 @@ internal static class ScheduleManagerWindow
             SelectedIndex = 0,
             MinWidth = 100,
         };
-        var startTime = new TextBox { PlaceholderText = "08:00（留空按节次推导）", Width = 170 };
-        var endTime = new TextBox { PlaceholderText = "09:40（留空按节次推导）", Width = 170 };
+        var startTime = new TimePicker
+        {
+            ClockIdentifier = "24HourClock", UseSeconds = false, MinuteIncrement = 1, Width = 170,
+        };
+        var endTime = new TimePicker
+        {
+            ClockIdentifier = "24HourClock", UseSeconds = false, MinuteIncrement = 1, Width = 170,
+        };
+        ToolTip.SetTip(startTime, "留空则按开始节次推导");
+        ToolTip.SetTip(endTime, "留空则按结束节次推导");
 
         string? editingId = null;
 
@@ -103,8 +111,8 @@ internal static class ScheduleManagerWindow
             startWeek.Value = 1;
             endWeek.Value = 16;
             parity.SelectedIndex = 0;
-            startTime.Text = string.Empty;
-            endTime.Text = string.Empty;
+            startTime.SelectedTime = null;
+            endTime.SelectedTime = null;
             error.IsVisible = false;
         }
 
@@ -125,8 +133,8 @@ internal static class ScheduleManagerWindow
                 WeekParity.Even => 2,
                 _ => 0,
             };
-            startTime.Text = item.StartTime;
-            endTime.Text = item.EndTime;
+            startTime.SelectedTime = TimeSpan.TryParse(item.StartTime, out var start) ? start : null;
+            endTime.SelectedTime = TimeSpan.TryParse(item.EndTime, out var end) ? end : null;
             error.IsVisible = false;
         }
 
@@ -151,15 +159,15 @@ internal static class ScheduleManagerWindow
             var sWeek = (int)(startWeek.Value ?? 1);
             var eWeek = (int)(endWeek.Value ?? 1);
 
-            string? startText = string.IsNullOrWhiteSpace(startTime.Text) ? null : startTime.Text.Trim();
-            string? endText = string.IsNullOrWhiteSpace(endTime.Text) ? null : endTime.Text.Trim();
+            string? startText = startTime.SelectedTime is { } start ? $"{start.Hours:00}:{start.Minutes:00}" : null;
+            string? endText = endTime.SelectedTime is { } end ? $"{end.Hours:00}:{end.Minutes:00}" : null;
             if (startText is null || endText is null)
             {
                 var fromPeriods = Timetable.ResolvePeriodTime(file.Periods, sPeriod);
                 var endFromPeriods = Timetable.ResolvePeriodTime(file.Periods, ePeriod);
                 if (fromPeriods is null || endFromPeriods is null)
                 {
-                    ShowError($"第 {sPeriod}-{ePeriod} 节不在节次时间表内，请填写开始/结束时间。");
+                    ShowError($"第 {sPeriod}-{ePeriod} 节不在节次时间表内，请选择开始/结束时间。");
                     return false;
                 }
                 startText ??= fromPeriods.Value.StartTime;

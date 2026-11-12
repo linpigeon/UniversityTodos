@@ -119,6 +119,7 @@ public partial class App : Application
         ViewModel?.AutoSync.Dispose();
         ViewModel?.ClassReminder.Dispose();
         ViewModel?.Reminder.Dispose();
+        ViewModel?.ElectricityReminder.Dispose();
         MainWindow?.QuitForReal();
     }
 
@@ -204,6 +205,7 @@ public partial class App : Application
                 ViewModel?.AutoSync.Dispose();
                 ViewModel?.ClassReminder.Dispose();
                 ViewModel?.Reminder.Dispose();
+                ViewModel?.ElectricityReminder.Dispose();
                 _trayIcon?.Dispose();
             };
         }

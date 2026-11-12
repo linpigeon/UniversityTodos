@@ -15,9 +15,8 @@ namespace UniversityTodos.Services;
 /// 桌面走 Avalonia 的 CookieManager 抽象，Android 走平台注入的原生读取。
 /// </para>
 /// <para>
-/// 之所以不自己 POST 账号密码：那样就得在应用里保存明文密码。走官网页面的好处是
-/// 账号密码只经过批改网自己的表单，应用只拿到会话 Cookie（且用 DPAPI 加密落盘），
-/// 顺带还能用首页上的第三方登录入口。
+/// 官网页面用于手动登录、第三方登录，以及直接 POST 不可用时的回退；应用只捕获会话 Cookie
+/// （且用 DPAPI 加密落盘）。可选的账密直接 POST 由 <see cref="PigaiDirectLoginService"/> 实现。
 /// </para>
 /// </summary>
 public static class PigaiLoginService
@@ -31,6 +30,17 @@ public static class PigaiLoginService
 
     /// <summary>未完成作文列表页，登录成功后导航过去以便立刻看到内容。</summary>
     public const string WaitCompleteUrl = "https://www.pigai.org/index.php?c=write&a=waitComplete&bf=4";
+
+    public const string WeChatLoginUrl = "https://www.pigai.org/d3/weixin/wxlogin.html";
+
+    internal static string BuildCredentialLoginScript(string account, string password) =>
+        "(()=>{" +
+        "var a=document.querySelector('#username'),p=document.querySelector('#password'),b=document.querySelector('#ulogin');" +
+        "if(!a||!p||!b)return '';" +
+        $"a.value={System.Text.Json.JsonSerializer.Serialize(account)};p.value={System.Text.Json.JsonSerializer.Serialize(password)};" +
+        "a.dispatchEvent(new Event('input',{bubbles:true}));p.dispatchEvent(new Event('input',{bubbles:true}));" +
+        "a.dispatchEvent(new Event('change',{bubbles:true}));p.dispatchEvent(new Event('change',{bubbles:true}));" +
+        "b.click();return 'submitted';})()";
 
     /// <summary>Android 注入的原生 Cookie 读取（返回 pigai.org 域的整条 Cookie）。</summary>
     public static Func<Task<string?>>? CookieReaderOverride { get; set; }
@@ -76,8 +86,10 @@ public static class PigaiLoginService
     /// </para>
     /// </summary>
     /// <returns>拿到状态时返回 "in"/"out"；超时或未就绪返回 null。</returns>
-    public static async Task<string?> TryProbeAsync(NativeWebView webView, CancellationToken ct = default)
+    public static async Task<string?> TryProbeAsync(
+        NativeWebView webView, CancellationToken ct = default, PageReadyGate? pageGate = null)
     {
+        if (pageGate is { HasCompletedNavigation: false }) return null;
         var script = InvokeScriptAsync(webView);
         var delay = Task.Delay(ProbeTimeout, ct);
 
@@ -85,6 +97,7 @@ public static class PigaiLoginService
         if (!ReferenceEquals(finished, script))
         {
             script.Observe();
+            delay.Observe();
             return null;
         }
 
@@ -122,13 +135,14 @@ public static class PigaiLoginService
     /// <c>'in'/'out'</c>（因为批改网受限页未登录时也返回 200）。
     /// </para>
     /// </summary>
-    /// <param name="webView">已经显示在界面上的 WebView。</param>
+    /// <param name="webView">已挂载的 WebView；可在后台隐藏，转人工时显示同一实例。</param>
     /// <param name="pollInterval">页面内探测间隔。</param>
     /// <param name="timeout">整体超时。</param>
     public static async Task<PigaiSessionFile?> WaitForLoginAsync(
         NativeWebView webView,
         TimeSpan? pollInterval = null,
         TimeSpan? timeout = null,
+        PageReadyGate? pageGate = null,
         CancellationToken ct = default)
     {
         var interval = pollInterval ?? TimeSpan.FromSeconds(2);
@@ -140,8 +154,9 @@ public static class PigaiLoginService
             ct.ThrowIfCancellationRequested();
             // 回到 UI 线程再碰 WebView。
             await Task.Delay(interval, ct).ConfigureAwait(true);
+            if (pageGate is { HasCompletedNavigation: false }) continue;
 
-            var status = await TryProbeAsync(webView, ct).ConfigureAwait(true);
+            var status = await TryProbeAsync(webView, ct, pageGate).ConfigureAwait(true);
             Log($"probe: {(status ?? "(null)")}");
             if (status is null)
             {

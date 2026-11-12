@@ -140,6 +140,8 @@ public sealed partial class MainViewModel : ViewModelBase
             // 课表：整页覆盖展示（网格需要宽度），内容来自教务系统导入。
             // 图标用黑板：既与「计划内」的日历区分开，也贴合「上课」的意象。
             new NavItem("timetable", "课表", "\uF51B", "周课表（可从教务系统一键导入）"),
+            new NavItem("exam-info", "考试", "\uF073", "教务考试安排、学分与成绩"),
+            new NavItem("electricity", "水电费", "\uF0E7", "宿舍电费与水费总览"),
             new NavItem("announcement", "公告", "\uF0A1", "课程公告，未读的排在前面"),
             new NavItem("completed", "已完成", "\uF058", "雨课堂判定已完成的作业"),
             new NavItem("all", "全部", "\uF03A", "作业与公告的全部内容"),
@@ -190,6 +192,13 @@ public sealed partial class MainViewModel : ViewModelBase
         // 截止提醒：临近截止 + 自建事项的显式提醒 + 每日逾期汇总。
         // 与上课提醒分开成两个服务：两者数据源、去重身份、开关都不同。
         Reminder = new ReminderService(() => _reminderTodos, Notifier);
+
+        ElectricityReminder = new ElectricityReminderService(
+            RefreshElectricityCoreAsync,
+            () => Electricity.LowBalanceThreshold,
+            () => Electricity.NotifyLowBalance,
+            Notifier);
+        Electricity.SettingsChanged += changed => _ = RestartElectricityReminderAsync(changed);
     }
 
     /// <summary>
@@ -370,22 +379,70 @@ public sealed partial class MainViewModel : ViewModelBase
     /// <summary>课表周视图的状态。</summary>
     public TimetableViewModels Timetable { get; } = new();
 
+    public ExamInfoViewModel ExamInfo { get; } = new();
+    public GradeInfoViewModel GradeInfo { get; } = new();
+
+    [ObservableProperty]
+    private int _examSectionIndex;
+
+    public bool ExamScheduleActive => ExamSectionIndex == 0;
+    public bool GradeActive => ExamSectionIndex == 1;
+
+    partial void OnExamSectionIndexChanged(int value)
+    {
+        OnPropertyChanged(nameof(ExamScheduleActive));
+        OnPropertyChanged(nameof(GradeActive));
+    }
+
+    [ObservableProperty]
+    private bool _examInfoOpen;
+
     /// <summary>是否显示课表页（与设置页同款：整页覆盖，不是弹窗）。</summary>
     [ObservableProperty]
     private bool _timetableOpen;
 
+    public ElectricityViewModel Electricity { get; } = new();
+
+    public WaterViewModel Water { get; } = new();
+
+    public bool ShowWaterHistory
+    {
+        get => Water.ShowHistory;
+        set
+        {
+            if (Water.ShowHistory == value) return;
+            Water.ShowHistory = value;
+            OnPropertyChanged();
+            if (value && !Water.IsLoading) _ = RefreshWaterAsync();
+        }
+    }
+
+    public static Func<Avalonia.Controls.NativeWebView?>? WaterWebViewAccessor { get; set; }
+    public static PageReadyGate? WaterPageGate { get; set; }
+
+    private CancellationTokenSource? _waterQueryCts;
+
+    public ElectricityReminderService ElectricityReminder { get; }
+
+    [ObservableProperty]
+    private bool _electricityOpen;
+
     /// <summary>
     /// 待办区（列表 + 详情）是否可见。
     /// <para>
-    /// **必须是合成条件**：设置页与课表页都是整页覆盖，任一打开时待办区都要让位。
+    /// **必须是合成条件**：设置页、课表页与电费页都是整页覆盖，任一打开时待办区都要让位。
     /// 只门控其中一个会漏——实测踩到过两次同类问题（先只判 <c>SettingsOpen</c>，
     /// 加了课表页之后待办列表就透在课表下面）。这类「各判各的」只要新增一个覆盖页就会再犯，
     /// 所以统一收在一个属性里表达。
     /// </para>
     /// </summary>
-    public bool ShowTodoPane => !SettingsOpen && !TimetableOpen && !JwImportOpen;
+    public bool ShowTodoPane => !SettingsOpen && !TimetableOpen && !ElectricityOpen && !JwImportOpen && !ExamInfoOpen;
+
+    partial void OnExamInfoOpenChanged(bool value) => OnPropertyChanged(nameof(ShowTodoPane));
 
     partial void OnTimetableOpenChanged(bool value) => OnPropertyChanged(nameof(ShowTodoPane));
+
+    partial void OnElectricityOpenChanged(bool value) => OnPropertyChanged(nameof(ShowTodoPane));
 
     partial void OnSettingsOpenChanged(bool value) => OnPropertyChanged(nameof(ShowTodoPane));
 
@@ -399,31 +456,51 @@ public sealed partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private string _jwLoginUrlInput = string.Empty;
 
-    /// <summary>
-    /// 学期第一周的周一（设置页可编辑，<c>yyyy-MM-dd</c>）。
-    /// <para>改动立即落盘并重建课表网格——「周次 → 日期」的换算完全依赖它。</para>
-    /// </summary>
     [ObservableProperty]
-    private string _termStartDateInput = AppSettings.Current.TermStartDate ?? string.Empty;
+    private string _jwSessionStatus = "教务系统：未保存登录状态";
 
-    partial void OnTermStartDateInputChanged(string value)
+    public PlatformCredentialViewModel ChaoxingCredential { get; } = new("chaoxing-credentials.json");
+    public PlatformCredentialViewModel PigaiCredential { get; } = new("pigai-credentials.json");
+
+    private readonly CredentialStore _waterCredentialStore = new("water-credentials.json");
+    private readonly WaterSessionStore _waterSessionStore = new();
+    private CredentialFile? _waterCredential;
+
+    [ObservableProperty]
+    private string _waterAccountInput = string.Empty;
+
+    [ObservableProperty]
+    private string _waterPasswordInput = string.Empty;
+
+    [ObservableProperty]
+    private string _waterCredentialStatus = "未保存登录凭据";
+
+    public bool HasWaterCredentials => _waterCredential is not null;
+
+    /// <summary>学期第一周的周一，通过日期选择控件修改并立即落盘。</summary>
+    [ObservableProperty]
+    private DateTime? _termStartDate = CreateTermStartDate(AppSettings.Current.TermStartDate);
+
+    private static DateTime? CreateTermStartDate(string? value) =>
+        Services.Timetable.ParseDate(value) is { } date
+            ? date.ToDateTime(TimeOnly.MinValue)
+            : null;
+
+    partial void OnTermStartDateChanged(DateTime? value)
     {
-        var trimmed = (value ?? string.Empty).Trim();
-        // 允许清空；填了就必须是能解析的日期，否则不落盘——写坏基准会让整张课表的日期都错。
-        if (trimmed.Length > 0 && Services.Timetable.ParseDate(trimmed) is null) return;
-
-        var normalized = trimmed.Length > 0 ? trimmed : null;
+        var normalized = value?.ToString("yyyy-MM-dd");
         if (AppSettings.Current.TermStartDate == normalized) return;
 
         AppSettings.Current.TermStartDate = normalized;
         AppSettings.Current.Save();
         RebuildTimetable();
-
-        // 学期基准是上课提醒的前提：填上就该开始提醒，清掉就该停。
         RaiseClassReminderHint();
         if (ClassReminderEnabled) _ = ClassReminder.StartAsync();
         else _ = ClassReminder.StopAsync();
     }
+
+    [RelayCommand]
+    private void ClearTermStartDate() => TermStartDate = null;
 
     /// <summary>是否已配置教务网址（决定「导入课表」能否直接打开窗口）。</summary>
     public bool HasJwProfile => !string.IsNullOrWhiteSpace(_jwProfile.LoginUrl);
@@ -624,7 +701,12 @@ public sealed partial class MainViewModel : ViewModelBase
     partial void OnSelectedNavChanged(NavItem value)
     {
         if (value?.Key != "timetable") _navBeforeTimetable = value;
+        if (value?.Key != "electricity") _navBeforeElectricity = value;
+        if (value?.Key != "exam-info") _navBeforeExamInfo = value;
     }
+
+    private NavItem? _navBeforeElectricity;
+    private NavItem? _navBeforeExamInfo;
 
     /// <summary>
     /// 打开课表前选中的导航项；关闭课表时回到它。
@@ -728,40 +810,151 @@ public sealed partial class MainViewModel : ViewModelBase
     private bool _showCookieInput;
 
     /// <summary>
-    /// 登录覆盖层当前打开的账号类型："ykt"（雨课堂）/ "chaoxing"（学习通）/
-    /// "pigai"（批改网）/ null（关闭）。
-    /// 登录不再是启动门禁，而是从设置页进入的覆盖页。
+    /// 当前登录提供方："ykt"（雨课堂）/ "chaoxing"（学习通）/
+    /// "pigai"（批改网）/ "water"（统一认证）/ null（关闭）。与覆盖层显隐分开，后台登录期间 WebView 继续存活。
     /// </summary>
     [ObservableProperty]
     private string? _loginPageOpen;
 
-    /// <summary>雨课堂登录覆盖层是否打开。</summary>
+    [ObservableProperty]
+    private bool _loginBackground;
+
+    public bool LoginOverlayVisible => LoginPageOpen is not null && !LoginBackground;
+    public bool LoginHostVisible => LoginPageOpen is not null;
+    public double LoginOverlayOffsetX => LoginOverlayVisible ? 0 : -10000;
     public bool YktLoginOpen => LoginPageOpen == "ykt";
-
-    /// <summary>学习通登录覆盖层是否打开。</summary>
     public bool ChaoxingLoginOpen => LoginPageOpen == "chaoxing";
-
-    /// <summary>批改网登录覆盖层是否打开。</summary>
     public bool PigaiLoginOpen => LoginPageOpen == "pigai";
+    public bool WaterLoginOpen => LoginPageOpen == "water";
+    public bool PigaiPreferWeChat { get; private set; }
+    public bool LoginBackgroundRequested { get; private set; }
 
     partial void OnLoginPageOpenChanged(string? value)
     {
+        if (value is null) LoginBackground = false;
         OnPropertyChanged(nameof(YktLoginOpen));
         OnPropertyChanged(nameof(ChaoxingLoginOpen));
         OnPropertyChanged(nameof(PigaiLoginOpen));
+        OnPropertyChanged(nameof(WaterLoginOpen));
+        OnPropertyChanged(nameof(LoginOverlayVisible));
+        OnPropertyChanged(nameof(LoginHostVisible));
+        OnPropertyChanged(nameof(LoginOverlayOffsetX));
     }
 
-    /// <summary>打开雨课堂登录页（设置页「账号」）。</summary>
-    public void OpenYktLogin() => LoginPageOpen = "ykt";
+    partial void OnLoginBackgroundChanged(bool value)
+    {
+        OnPropertyChanged(nameof(LoginOverlayVisible));
+        OnPropertyChanged(nameof(LoginOverlayOffsetX));
+    }
 
-    /// <summary>打开学习通登录页。</summary>
-    public void OpenChaoxingLogin() => LoginPageOpen = "chaoxing";
+    private void OpenLogin(string provider, bool background)
+    {
+        _loginCts?.Cancel();
+        LoginBackgroundRequested = background && OperatingSystem.IsWindows();
+        LoginBackground = provider == "water"
+            ? background && WaterPageGate?.HasCompletedNavigation == true
+            : LoginBackgroundRequested;
+        LoginPageOpen = provider;
+    }
 
-    /// <summary>打开批改网登录页。</summary>
-    public void OpenPigaiLogin() => LoginPageOpen = "pigai";
+    public void OpenYktLogin() => OpenLogin("ykt", background: false);
 
-    /// <summary>关闭登录覆盖层。</summary>
-    public void CloseLoginPage() => LoginPageOpen = null;
+    public void OpenWaterLogin() => OpenLogin("water", background: false);
+
+    public void OpenChaoxingLogin(bool background = false) => OpenLogin("chaoxing", background);
+
+    public void OpenPigaiLogin()
+    {
+        PigaiPreferWeChat = false;
+        OpenLogin("pigai", background: false);
+    }
+
+    public void ShowManualLogin(string provider, string message)
+    {
+        if (LoginPageOpen != provider) return;
+        LoginBackground = false;
+        switch (provider)
+        {
+            case "ykt": LoginStatusText = message; break;
+            case "chaoxing": ChaoxingStatusText = message; break;
+            case "pigai": PigaiStatusText = message; break;
+            case "water": Water.StatusMessage = message; break;
+        }
+    }
+
+    [RelayCommand]
+    private Task SaveChaoxingCredentialsAsync() => ChaoxingCredential.SaveAsync();
+
+    [RelayCommand]
+    private Task ClearChaoxingCredentialsAsync() => ChaoxingCredential.ClearAsync();
+
+    [RelayCommand]
+    private async Task OpenChaoxingCredentialLoginAsync()
+    {
+        if (!await ChaoxingCredential.SaveAsync().ConfigureAwait(true)) return;
+        ChaoxingStatusText = "正在静默登录…";
+        var result = await ChaoxingDirectLoginService.LoginAsync(
+            ChaoxingCredential.AccountInput, ChaoxingCredential.PasswordInput).ConfigureAwait(true);
+        if (result.Success)
+        {
+            ChaoxingStatusText = result.Message;
+            await RestoreChaoxingAsync().ConfigureAwait(true);
+            await RefreshAsync().ConfigureAwait(true);
+            return;
+        }
+
+        ChaoxingStatusText = OperatingSystem.IsWindows()
+            ? $"{result.Message} 正在后台尝试官方登录页…"
+            : result.Message;
+        OpenChaoxingLogin(background: true);
+    }
+
+    [RelayCommand]
+    private Task SavePigaiCredentialsAsync() => PigaiCredential.SaveAsync();
+
+    [RelayCommand]
+    private Task ClearPigaiCredentialsAsync() => PigaiCredential.ClearAsync();
+
+    [RelayCommand]
+    private async Task OpenPigaiCredentialLoginAsync()
+    {
+        if (!await PigaiCredential.SaveAsync().ConfigureAwait(true)) return;
+        PigaiStatusText = "正在静默登录…";
+        var result = await PigaiDirectLoginService.LoginAsync(
+            PigaiCredential.AccountInput, PigaiCredential.PasswordInput).ConfigureAwait(true);
+        if (result.Success)
+        {
+            PigaiStatusText = result.Message;
+            await RestorePigaiAsync().ConfigureAwait(true);
+            await RefreshAsync().ConfigureAwait(true);
+            return;
+        }
+
+        PigaiStatusText = OperatingSystem.IsWindows()
+            ? $"{result.Message} 正在后台尝试官方登录页…"
+            : result.Message;
+        PigaiPreferWeChat = false;
+        OpenLogin("pigai", background: true);
+    }
+
+    [RelayCommand]
+    private void OpenPigaiWeChatLogin()
+    {
+        PigaiPreferWeChat = true;
+        PigaiStatusText = "请在打开的页面中点击“微信授权登录”，再在微信中允许授权…";
+        OpenLogin("pigai", background: false);
+    }
+
+    /// <summary>取消登录等待并关闭覆盖层；已加载页面仅在成功或用户取消时丢弃。</summary>
+    public void CloseLoginPage()
+    {
+        _loginCts?.Cancel();
+        _waterQueryCts?.Cancel();
+        LoginBackground = false;
+        LoginBackgroundRequested = false;
+        LoginPageOpen = null;
+        PigaiPreferWeChat = false;
+    }
 
     /// <summary>雨课堂登录态失效时的提示（列表顶部横幅）。</summary>
     [ObservableProperty]
@@ -779,6 +972,7 @@ public sealed partial class MainViewModel : ViewModelBase
         SettingsTabIndex = 1;
         SettingsOpen = true;
         TimetableOpen = false;
+        ExamInfoOpen = false;
         DrawerOpen = false;
     }
 
@@ -917,12 +1111,201 @@ public sealed partial class MainViewModel : ViewModelBase
         }
     }
 
+    public void OpenElectricity()
+    {
+        SettingsOpen = false;
+        TimetableOpen = false;
+        ExamInfoOpen = false;
+        ElectricityOpen = true;
+    }
+
+    [RelayCommand]
+    private void CloseElectricity()
+    {
+        var restore = _navBeforeElectricity;
+        _navBeforeElectricity = null;
+        if (restore is not null && !ReferenceEquals(restore, SelectedNav)) SelectedNav = restore;
+        else if (SelectedNav?.Key == "electricity") SelectedNav = NavItems[0];
+
+        CancelWaterQuery();
+        ElectricityOpen = false;
+        OnNavChanged();
+    }
+
+    [RelayCommand]
+    private async Task RefreshElectricityAsync()
+    {
+        var rooms = await RefreshElectricityCoreAsync(CancellationToken.None).ConfigureAwait(true);
+        if (rooms is not null)
+            await ElectricityReminder.ObserveAsync(rooms).ConfigureAwait(true);
+    }
+
+    [RelayCommand]
+    private Task SaveElectricityAccountAsync() => Electricity.SaveAccountAsync();
+
+    [RelayCommand]
+    private async Task RefreshWaterAsync()
+    {
+        if (Water.IsLoading) return;
+        var cts = new CancellationTokenSource();
+        _waterQueryCts = cts;
+        Water.IsLoading = true;
+        if (!WaterLoginOpen && !OperatingSystem.IsWindows()) OpenWaterLogin();
+        var silent = OperatingSystem.IsWindows() && !WaterLoginOpen;
+        if (silent) OpenLogin("water", background: true);
+        else LoginBackground = false;
+        try
+        {
+            Avalonia.Controls.NativeWebView? webView = null;
+            for (var i = 0; i < 150 && webView?.AdapterInfo is null; i++)
+            {
+                webView = WaterWebViewAccessor?.Invoke();
+                if (webView?.AdapterInfo is null) await Task.Delay(100, cts.Token).ConfigureAwait(true);
+            }
+            if (webView?.AdapterInfo is null)
+            {
+                if (silent) OpenWaterLogin();
+                Water.StatusMessage = "统一认证页面尚未就绪，请稍后重试";
+                return;
+            }
+
+            var progress = new Progress<string>(message => Water.StatusMessage = message);
+            var navigate = WaterPageGate?.HasCompletedNavigation != true;
+            if (navigate)
+            {
+                Water.StatusMessage = "正在恢复统一认证登录状态…";
+                await WaterSessionService.RestoreAsync(webView).ConfigureAwait(true);
+            }
+            var includeHistory = Water.ShowHistory;
+            IReadOnlyList<WaterBill>? bills;
+            try
+            {
+                bills = await WaterService.WaitForLatestAsync(
+                    webView, progress,
+                    timeout: silent ? TimeSpan.FromSeconds(45) : null,
+                    account: _waterCredential?.Account,
+                    password: _waterCredential?.Password,
+                    navigate: navigate,
+                    semesterStart: Services.Timetable.ParseDate(AppSettings.Current.TermStartDate),
+                    semesterEnd: null,
+                    pageGate: WaterPageGate,
+                    includeHistory: includeHistory,
+                    ct: cts.Token).ConfigureAwait(true);
+            }
+            catch (Exception) when (silent && !cts.IsCancellationRequested)
+            {
+                bills = null;
+            }
+
+            if (bills is null && silent && !cts.IsCancellationRequested)
+            {
+                OpenLogin("water", background: false);
+                Water.StatusMessage = "后台获取未完成，请在统一认证页面手动登录…";
+                bills = await WaterService.WaitForLatestAsync(
+                    webView, progress,
+                    account: _waterCredential?.Account,
+                    password: _waterCredential?.Password,
+                    navigate: false,
+                    semesterStart: Services.Timetable.ParseDate(AppSettings.Current.TermStartDate),
+                    semesterEnd: null,
+                    pageGate: WaterPageGate,
+                    includeHistory: includeHistory,
+                    ct: cts.Token).ConfigureAwait(true);
+            }
+
+            if (bills is null)
+            {
+                Water.StatusMessage = "水费查询失败，已保留上次数据，请重试";
+                return;
+            }
+
+            if (await WaterSessionService.SaveAsync(webView).ConfigureAwait(true))
+                WaterCredentialStatus = "登录状态已加密保存，主动查询时在后台恢复";
+            await Water.SaveAsync(bills, cts.Token, includeHistory).ConfigureAwait(true);
+            Water.StatusMessage = includeHistory
+                ? $"已缓存 {Water.LatestBills.Count} 条本学期账单和 {Water.HistoryBills.Count} 条往期账单"
+                : Water.HasData
+                    ? $"已更新本学期账单，合计 {Water.TotalFee:F2} 元"
+                    : "本学期暂无水费账单";
+            if (WaterLoginOpen)
+            {
+                CloseLoginPage();
+                OpenElectricity();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Water.StatusMessage = "已取消水费查询，保留上次数据";
+        }
+        catch (Exception ex)
+        {
+            Water.StatusMessage = $"水费查询失败：{ex.Message}，已保留上次数据";
+        }
+        finally
+        {
+            LoginBackground = false;
+            Water.IsLoading = false;
+            _waterQueryCts = null;
+            cts.Dispose();
+        }
+    }
+
+    [RelayCommand]
+    private void CancelWaterQuery()
+    {
+        _waterQueryCts?.Cancel();
+        if (LoginBackground && WaterLoginOpen) CloseLoginPage();
+        else LoginBackground = false;
+    }
+
+    private async Task<IReadOnlyList<ElectricityRoom>?> RefreshElectricityCoreAsync(CancellationToken ct)
+    {
+        var success = await Dispatcher.UIThread
+            .InvokeAsync(() => Electricity.RefreshAsync(ct))
+            .ConfigureAwait(false);
+        return success ? Electricity.Rooms.ToList() : null;
+    }
+
+    private async Task RestartElectricityReminderAsync(bool accountChanged)
+    {
+        await ElectricityReminder.StopAsync().ConfigureAwait(true);
+        if (accountChanged)
+            await ElectricityReminder.ResetBaselineAsync().ConfigureAwait(true);
+
+        if (!App.DeferInitialLoad && State == AppState.Ready
+            && !string.IsNullOrWhiteSpace(Electricity.Account))
+        {
+            await ElectricityReminder.StartAsync(AppSettings.Current.AutoRefreshMinutes).ConfigureAwait(true);
+        }
+    }
+
     /// <summary>打开课程表（按当前日期定位到本周）。</summary>
     public void OpenTimetable()
     {
         SettingsOpen = false;
+        ElectricityOpen = false;
+        ExamInfoOpen = false;
         GotoCurrentTimetableWeek();
         TimetableOpen = true;
+    }
+
+    public void OpenExamInfo()
+    {
+        SelectedNav = NavItems.First(item => item.Key == "exam-info");
+        SettingsOpen = false;
+        ElectricityOpen = false;
+        TimetableOpen = false;
+        ExamInfoOpen = true;
+    }
+
+    public void CloseExamInfo()
+    {
+        var restore = _navBeforeExamInfo;
+        _navBeforeExamInfo = null;
+        if (restore is not null && !ReferenceEquals(restore, SelectedNav)) SelectedNav = restore;
+        else if (SelectedNav?.Key == "exam-info") SelectedNav = NavItems[0];
+        ExamInfoOpen = false;
+        OnNavChanged();
     }
 
     /// <summary>
@@ -1052,6 +1435,73 @@ public sealed partial class MainViewModel : ViewModelBase
             : $"时间表已保存：共 {periods.Count} 节。";
     }
 
+    private async Task LoadCredentialsAsync()
+    {
+        _waterCredential = await _waterCredentialStore.LoadAsync().ConfigureAwait(true);
+        var waterSession = await _waterSessionStore.LoadAsync().ConfigureAwait(true);
+        if (_waterCredential is not null)
+        {
+            WaterAccountInput = _waterCredential.Account;
+            WaterPasswordInput = _waterCredential.Password;
+            WaterCredentialStatus = waterSession is null
+                ? $"凭据已加密保存（{_waterCredential.SavedAt:MM-dd HH:mm}）"
+                : "凭据与登录状态均已加密保存";
+        }
+        else if (waterSession is not null)
+        {
+            WaterCredentialStatus = "登录状态已加密保存，主动查询时在后台恢复";
+        }
+        await ChaoxingCredential.LoadAsync().ConfigureAwait(true);
+        await PigaiCredential.LoadAsync().ConfigureAwait(true);
+        OnPropertyChanged(nameof(HasWaterCredentials));
+    }
+
+    private static Task<CredentialFile> SaveCredentialCoreAsync(
+        CredentialStore store, string account, string password, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(account) || string.IsNullOrEmpty(password))
+            throw new ArgumentException("学号和密码都不能为空");
+        var file = new CredentialFile { Account = account.Trim(), Password = password };
+        return store.SaveAsync(file, ct).ContinueWith(
+            _ => file, ct, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+    }
+
+    [RelayCommand]
+    private async Task SaveWaterCredentialsAsync()
+    {
+        try
+        {
+            _waterCredential = await SaveCredentialCoreAsync(
+                    _waterCredentialStore, WaterAccountInput, WaterPasswordInput)
+                .ConfigureAwait(true);
+            WaterCredentialStatus = "凭据已加密保存";
+            OnPropertyChanged(nameof(HasWaterCredentials));
+        }
+        catch (Exception ex)
+        {
+            WaterCredentialStatus = $"保存失败：{ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task ClearWaterCredentialsAsync()
+    {
+        await _waterCredentialStore.ClearAsync().ConfigureAwait(true);
+        await _waterSessionStore.ClearAsync().ConfigureAwait(true);
+        _waterCredential = null;
+        WaterAccountInput = string.Empty;
+        WaterPasswordInput = string.Empty;
+        WaterCredentialStatus = "已清除凭据与登录状态";
+        OnPropertyChanged(nameof(HasWaterCredentials));
+    }
+
+    [RelayCommand]
+    private async Task OpenWaterLoginAsync()
+    {
+        OpenWaterLogin();
+        await RefreshWaterAsync().ConfigureAwait(true);
+    }
+
     /// <summary>打开教务系统导入（网页抓取）。</summary>
     public void OpenJwImport()
     {
@@ -1062,17 +1512,82 @@ public sealed partial class MainViewModel : ViewModelBase
             return;
         }
 
+        JwImportForExam = false;
+        JwImportForGrades = false;
         JwImportOpen = true;
         TimetableStatus = string.Empty;
+    }
+
+    public void OpenExamInfoImport()
+    {
+        if (!HasJwProfile)
+        {
+            ExamInfo.StatusMessage = "请先在 设置 → 账号 填写学校教务系统登录页网址。";
+            return;
+        }
+
+        JwImportForExam = true;
+        JwImportForGrades = false;
+        JwImportOpen = true;
+        TimetableStatus = string.Empty;
+    }
+
+    public void OpenGradeInfoImport()
+    {
+        if (!HasJwProfile)
+        {
+            GradeInfo.StatusMessage = "请先在 设置 → 账号 填写学校教务系统登录页网址。";
+            return;
+        }
+
+        JwImportForExam = false;
+        JwImportForGrades = true;
+        JwImportOpen = true;
+        TimetableStatus = string.Empty;
+    }
+
+    [ObservableProperty]
+    private bool _jwImportForExam;
+
+    [ObservableProperty]
+    private bool _jwImportForGrades;
+
+    public string JwImportTitle => JwImportForGrades ? "获取成绩与学分" : JwImportForExam ? "获取教务考试信息" : "导入教务课表";
+    public string JwImportDescription => JwImportForGrades
+        ? "教务系统已在独立窗口中打开；登录后自动读取成绩、学分与专业执行计划"
+        : JwImportForExam
+            ? "教务系统已在独立窗口中打开；登录并进入「考试信息查询」后自动读取"
+            : "教务系统已在独立窗口中打开；登录并进入「课表查询」页后，点窗口右下角的蓝色按钮抓取";
+    public string JwImportGuide => JwImportForGrades
+        ? "在教务窗口里完成登录。成绩页就绪后会自动读取全部学年成绩、学分统计与专业执行计划；也可点下面的按钮手动获取。"
+        : JwImportForExam
+            ? "在教务窗口里完成登录并进入「考试信息查询」。页面就绪后会自动读取；也可点下面的按钮手动获取。"
+            : "在教务窗口里完成登录，点进「个人课表查询」，然后：\n① 点窗口右下角的「一键获取课表」；\n② 或回到这里点下面的「抓取当前页课表」。";
+    public string JwFetchButtonText => JwImportForGrades ? "读取成绩与学分" : JwImportForExam ? "读取考试信息" : "抓取当前页课表";
+    public string JwReturnButtonText => JwImportForGrades ? "返回学分与成绩" : JwImportForExam ? "返回考试信息" : "返回课表";
+
+    partial void OnJwImportForExamChanged(bool value) => NotifyJwImportModeChanged();
+    partial void OnJwImportForGradesChanged(bool value) => NotifyJwImportModeChanged();
+
+    private void NotifyJwImportModeChanged()
+    {
+        OnPropertyChanged(nameof(JwImportTitle));
+        OnPropertyChanged(nameof(JwImportDescription));
+        OnPropertyChanged(nameof(JwImportGuide));
+        OnPropertyChanged(nameof(JwFetchButtonText));
+        OnPropertyChanged(nameof(JwReturnButtonText));
     }
 
     /// <summary>教务导入页是否打开。</summary>
     [ObservableProperty]
     private bool _jwImportOpen;
 
+    private CancellationTokenSource? _examFetchCts;
+
     /// <summary>关闭教务导入页。</summary>
     public void CloseJwImport()
     {
+        _examFetchCts?.Cancel();
         JwImportOpen = false;
         JwDialogAccessor = null;
     }
@@ -1145,6 +1660,7 @@ public sealed partial class MainViewModel : ViewModelBase
 
     /// <summary>是否展示「今天的课」区块：只在「我的一天」且当天有课。</summary>
     public bool ShowTodayClasses => SelectedNav?.Key == "myday" && TodayClasses.Count > 0;
+    public bool ShowEmptyState => !List.HasAnyContent && !ShowTodayClasses;
 
     /// <summary>重算今天的课程（课表变化、跨天时调用）。</summary>
     private void RefreshTodayClasses()
@@ -1161,6 +1677,7 @@ public sealed partial class MainViewModel : ViewModelBase
         }
 
         OnPropertyChanged(nameof(ShowTodayClasses));
+        OnPropertyChanged(nameof(ShowEmptyState));
     }
 
     /// <summary>当前学期标识（导入时写入条目）。</summary>
@@ -1262,6 +1779,130 @@ public sealed partial class MainViewModel : ViewModelBase
         catch (Exception ex)
         {
             TimetableStatus = $"抓取出错：{ex.Message}";
+        }
+    }
+
+    public async Task FetchJwExamsNowAsync()
+    {
+        if (ExamInfo.IsLoading) return;
+        var dialog = JwDialogAccessor?.Invoke();
+        var gate = JwPageGate;
+        if (dialog is null || gate is null)
+        {
+            TimetableStatus = "教务窗口未打开，请点「重新打开教务窗口」。";
+            return;
+        }
+        if (!gate.HasCompletedNavigation)
+        {
+            TimetableStatus = "教务页面还在加载中，请稍候。";
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _examFetchCts = cts;
+        ExamInfo.IsLoading = true;
+        JwSessionStatus = "教务系统：正在后台读取考试信息…";
+        var progress = new Progress<string>(message =>
+        {
+            TimetableStatus = message;
+            ExamInfo.StatusMessage = message;
+        });
+        try
+        {
+            var result = await ExamService.FetchExamsAsync(
+                dialog, gate, ExamInfo.AcademicYear, ExamInfo.Semester,
+                progress: progress, ct: cts.Token).ConfigureAwait(true);
+            if (!result.Success)
+            {
+                TimetableStatus = result.Message;
+                ExamInfo.StatusMessage = result.Message;
+                JwSessionStatus = "教务系统：获取失败，请检查登录状态";
+                return;
+            }
+
+            await ExamInfo.SaveAsync(result.Items, cts.Token).ConfigureAwait(true);
+            ExamInfo.StatusMessage = result.Message;
+            TimetableStatus = result.Message;
+            JwSessionStatus = "教务系统：登录状态有效，考试信息已更新";
+            ExamSectionIndex = 0;
+            ExamInfoOpen = true;
+            CloseJwImport();
+        }
+        catch (OperationCanceledException)
+        {
+            if (JwImportOpen) TimetableStatus = "已取消考试信息读取。";
+        }
+        catch (Exception ex)
+        {
+            TimetableStatus = $"考试信息获取失败：{ex.Message}";
+            ExamInfo.StatusMessage = "获取失败，已保留本地考试缓存";
+            JwSessionStatus = "教务系统：获取失败，已保留本地考试缓存";
+        }
+        finally
+        {
+            if (ReferenceEquals(_examFetchCts, cts)) _examFetchCts = null;
+            ExamInfo.IsLoading = false;
+            cts.Dispose();
+        }
+    }
+
+    public async Task FetchJwGradesNowAsync()
+    {
+        if (GradeInfo.IsLoading) return;
+        var dialog = JwDialogAccessor?.Invoke();
+        var gate = JwPageGate;
+        if (dialog is null || gate is null)
+        {
+            TimetableStatus = "教务窗口未打开，请点「重新打开教务窗口」。";
+            return;
+        }
+        if (!gate.HasCompletedNavigation)
+        {
+            TimetableStatus = "教务页面还在加载中，请稍候。";
+            return;
+        }
+
+        var cts = new CancellationTokenSource();
+        _examFetchCts = cts;
+        GradeInfo.IsLoading = true;
+        var progress = new Progress<string>(message =>
+        {
+            TimetableStatus = message;
+            GradeInfo.StatusMessage = message;
+        });
+        try
+        {
+            var result = await GradeService.FetchAsync(
+                dialog, gate, JwEffectiveLoginUrl, GradeInfo.AcademicYear, GradeInfo.Semester,
+                progress: progress, ct: cts.Token).ConfigureAwait(true);
+            if (!result.Success)
+            {
+                TimetableStatus = result.Message;
+                GradeInfo.StatusMessage = result.Message;
+                return;
+            }
+
+            await GradeInfo.SaveAsync(result.Grades, result.Stats, cts.Token).ConfigureAwait(true);
+            GradeInfo.StatusMessage = result.Message;
+            TimetableStatus = result.Message;
+            ExamSectionIndex = 1;
+            ExamInfoOpen = true;
+            CloseJwImport();
+        }
+        catch (OperationCanceledException)
+        {
+            if (JwImportOpen) TimetableStatus = "已取消成绩与学分读取。";
+        }
+        catch (Exception ex)
+        {
+            TimetableStatus = $"成绩与学分获取失败：{ex.Message}";
+            GradeInfo.StatusMessage = "获取失败，已保留本地成绩缓存";
+        }
+        finally
+        {
+            if (ReferenceEquals(_examFetchCts, cts)) _examFetchCts = null;
+            GradeInfo.IsLoading = false;
+            cts.Dispose();
         }
     }
 
@@ -1524,6 +2165,15 @@ public sealed partial class MainViewModel : ViewModelBase
             // 课表读不出来不该挡住其它功能（store 内部已做坏数据兜底，这里是最后一道）。
         }
 
+        var jwSession = await new JwSessionStore().LoadAsync().ConfigureAwait(true);
+        if (jwSession is not null)
+            JwSessionStatus = "教务系统：登录状态已加密保存，点击获取时在后台恢复";
+        await ExamInfo.LoadAsync().ConfigureAwait(true);
+        await GradeInfo.LoadAsync().ConfigureAwait(true);
+        await Electricity.LoadAsync().ConfigureAwait(true);
+        await LoadCredentialsAsync().ConfigureAwait(true);
+        await Water.LoadAsync().ConfigureAwait(true);
+
         var saved = await _sessionStore.LoadAsync().ConfigureAwait(true);
         if (saved is { HasValue: true })
         {
@@ -1567,7 +2217,11 @@ public sealed partial class MainViewModel : ViewModelBase
         // 自检/离屏渲染模式（DeferInitialLoad=true）只验证界面，不启动提醒，
         // 否则跑一次自检可能弹出真实的截止通知。
         if (!App.DeferInitialLoad)
+        {
             await Reminder.StartAsync().ConfigureAwait(true);
+            if (!string.IsNullOrWhiteSpace(Electricity.Account))
+                await ElectricityReminder.StartAsync(AppSettings.Current.AutoRefreshMinutes).ConfigureAwait(true);
+        }
 
         // 安装路径可能变过（用户挪了目录）：按设置重写一次启动项，保证指向当前 exe。
         if (AppSettings.Current.LaunchAtLogin && PlatformServices is { SupportsAutoLaunch: true } autostart)
@@ -1622,7 +2276,8 @@ public sealed partial class MainViewModel : ViewModelBase
     public async Task CompleteLoginAsync(
         Avalonia.Controls.NativeWebView webView,
         bool isAutoDetect = false,
-        bool quickProbe = false)
+        bool quickProbe = false,
+        PageReadyGate? pageGate = null)
     {
         // 用户主动点击可以打断后台自动检测——这是按钮必须始终可点的原因。
         if (isAutoDetect && IsBusy) return;
@@ -1639,13 +2294,13 @@ public sealed partial class MainViewModel : ViewModelBase
         {
             var progress = new Progress<LoginStatus>(s => LoginStatusText = s.Message);
 
-            if (quickProbe && await TryAdoptExistingSessionAsync(webView).ConfigureAwait(true))
+            if (quickProbe && await TryAdoptExistingSessionAsync(webView, pageGate).ConfigureAwait(true))
             {
                 return;
             }
 
             var session = await _loginService
-                .WaitForLoginAsync(webView, progress, ct: ct)
+                .WaitForLoginAsync(webView, progress, pageGate: pageGate, ct: ct)
                 .ConfigureAwait(true);
 
             if (session is null)
@@ -1663,6 +2318,7 @@ public sealed partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            if (LoginBackground) LoginBackground = false;
             LoginStatusText = $"登录过程出错：{ex.Message}";
         }
         finally
@@ -1691,11 +2347,12 @@ public sealed partial class MainViewModel : ViewModelBase
     /// 快速路径：WebView 里若已经有可用的登录态就直接接管并同步。
     /// 用于「重新检测登录」——此时页面通常已经加载好，没必要再等一个轮询间隔。
     /// </summary>
-    private async Task<bool> TryAdoptExistingSessionAsync(Avalonia.Controls.NativeWebView webView)
+    private async Task<bool> TryAdoptExistingSessionAsync(
+        Avalonia.Controls.NativeWebView webView, PageReadyGate? pageGate = null)
     {
         LoginStatusText = "正在检测登录状态…";
 
-        var status = await YktLoginService.TryProbeAsync(webView).ConfigureAwait(true);
+        var status = await YktLoginService.TryProbeAsync(webView, pageGate: pageGate).ConfigureAwait(true);
         if (status != "200") return false;
 
         var session = await YktLoginService
@@ -1923,12 +2580,23 @@ public sealed partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private string _overdueDigestTime = AppSettings.Current.OverdueDigestTime;
 
+    public TimeSpan? OverdueDigestTimeValue
+    {
+        get => TimeSpan.TryParse(OverdueDigestTime, out var value) ? value : null;
+        set
+        {
+            if (value is null) return;
+            OverdueDigestTime = $"{value.Value.Hours:00}:{value.Value.Minutes:00}";
+        }
+    }
+
     partial void OnOverdueDigestTimeChanged(string value)
     {
         var text = (value ?? string.Empty).Trim();
-        if (!AppSettings.IsValidDigestTime(text)) return; // 非法输入不落盘，等用户改对
+        if (!AppSettings.IsValidDigestTime(text)) return;
         AppSettings.Current.OverdueDigestTime = text;
         SaveSettingsDebounced();
+        OnPropertyChanged(nameof(OverdueDigestTimeValue));
     }
 
     /// <summary>当前平台是否支持开机自启（桌面 Windows 支持）。</summary>
@@ -1983,6 +2651,13 @@ public sealed partial class MainViewModel : ViewModelBase
         var hasAnySource = _api is not null || _chaoxingCookie is not null || _pigaiCookie is not null;
         if (State == AppState.Ready && (hasAnySource || AutoSync.IsRunning) && AutoSync.IntervalMinutes != minutes)
             _ = AutoSync.StartAsync(minutes);
+
+        if (!App.DeferInitialLoad && State == AppState.Ready
+            && (!string.IsNullOrWhiteSpace(Electricity.Account) || ElectricityReminder.IsRunning)
+            && ElectricityReminder.IntervalMinutes != minutes)
+        {
+            _ = ElectricityReminder.StartAsync(minutes);
+        }
     }
 
     /// <summary>
@@ -2124,6 +2799,8 @@ public sealed partial class MainViewModel : ViewModelBase
         SettingsOpen = true;
         // 设置与课表都是整页覆盖，同时打开会互相遮挡。
         TimetableOpen = false;
+        ExamInfoOpen = false;
+        ElectricityOpen = false;
         DrawerOpen = false;
     }
 
@@ -3178,6 +3855,16 @@ public sealed partial class MainViewModel : ViewModelBase
         if (SelectedNav?.Key == "timetable") OpenTimetable();
         else TimetableOpen = false;
 
+        if (SelectedNav?.Key == "exam-info") OpenExamInfo();
+        else ExamInfoOpen = false;
+
+        if (SelectedNav?.Key == "electricity") OpenElectricity();
+        else
+        {
+            CancelWaterQuery();
+            ElectricityOpen = false;
+        }
+
         // 两个详情面板的选中态都要清：它们各绑一个属性，
         // 只清一个会让「先选课程、再选待办」时两块详情叠加显示（实际踩过）。
         SelectedItem = null;
@@ -3189,6 +3876,7 @@ public sealed partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(ShowHideDoneToggle));
         OnPropertyChanged(nameof(ShowListLayoutControls));
         OnPropertyChanged(nameof(ShowTodayClasses));
+        OnPropertyChanged(nameof(ShowEmptyState));
     }
 
     /// <summary>刷新导航项的选中态与计数角标。</summary>
@@ -3230,6 +3918,7 @@ public sealed partial class MainViewModel : ViewModelBase
 
             nav.BadgeText = count > 0 ? count.ToString() : string.Empty;
         }
+        OnPropertyChanged(nameof(ShowEmptyState));
     }
 
     // 注意：这里刻意不监听 SelectedNav 的变化。导航状态由视图在点击时统一调用

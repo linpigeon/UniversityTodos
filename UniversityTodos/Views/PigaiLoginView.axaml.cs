@@ -12,7 +12,7 @@ namespace UniversityTodos.Views;
 /// 批改网登录页的交互。
 /// <para>
 /// 严格照搬雨课堂那条已跑通的路径（<see cref="LoginView"/> + <see cref="YktLoginService.WaitForLoginAsync"/>）：
-/// 打开覆盖层后启动一个 <b>async 轮询循环</b>，循环里
+/// 登录流程启动后运行一个 <b>async 轮询循环</b>（覆盖层可处于后台），循环里
 /// 「<c>Task.Delay</c> → <c>ConfigureAwait(true)</c> 回到 UI 线程 → 探测」，
 /// 探测确认已登录后再读 Cookie 建会话。
 /// </para>
@@ -29,9 +29,12 @@ public partial class PigaiLoginView : UserControl
     private bool _webViewReady;
     private bool _navigated;
     private bool _running;
+    private bool _credentialSubmitted;
 
     /// <summary>取消当前等待循环（覆盖层关闭 / 视图销毁时）。</summary>
     private CancellationTokenSource? _loginCts;
+    private CancellationTokenSource? _silentCts;
+    private readonly PageReadyGate _pageGate = new();
 
     public PigaiLoginView()
     {
@@ -40,6 +43,7 @@ public partial class PigaiLoginView : UserControl
         PigaiWebView.AdapterCreated += (_, _) =>
         {
             _webViewReady = true;
+            _pageGate.MarkAdapterCreated();
             WebViewPlaceholder.IsVisible = false;
             PigaiWebView.IsVisible = true;
             PigaiLoginService.Log("AdapterCreated");
@@ -48,10 +52,58 @@ public partial class PigaiLoginView : UserControl
         PigaiWebView.AdapterDestroyed += (_, _) =>
         {
             _webViewReady = false;
+            _pageGate.Reset();
             PigaiLoginService.Log("AdapterDestroyed");
         };
-        PigaiWebView.NavigationCompleted += (_, e) =>
+        PigaiWebView.NavigationStarted += (_, _) => _pageGate.MarkNavigating();
+        PigaiWebView.NavigationCompleted += async (_, e) =>
+        {
+            _pageGate.MarkReady();
             PigaiLoginService.Log($"NavigationCompleted success={e.IsSuccess} src={PigaiWebView.Source}");
+            await TryAutoLoginAsync();
+        };
+    }
+
+    private async Task TryAutoLoginAsync()
+    {
+        if (!_pageGate.HasCompletedNavigation) return;
+        if (Vm?.PigaiPreferWeChat == true
+            || _credentialSubmitted || Vm?.PigaiCredential.HasCredential != true) return;
+        _credentialSubmitted = true;
+        if (Vm is { } vm)
+        {
+            var result = await JwCaptureService.TryEvalAsync(
+                PigaiWebView,
+                PigaiLoginService.BuildCredentialLoginScript(
+                    vm.PigaiCredential.AccountInput, vm.PigaiCredential.PasswordInput));
+            if (vm.LoginBackground && result?.Trim().Trim('"') != "submitted")
+                vm.ShowManualLogin("pigai", "无法后台提交账密，请在当前页面手动登录…");
+        }
+    }
+
+    private void StartSilentFallback()
+    {
+        StopSilentFallback();
+        if (Vm?.LoginBackground != true) return;
+        _silentCts = new CancellationTokenSource();
+        _ = WatchSilentLoginAsync(_silentCts.Token);
+    }
+
+    private async Task WatchSilentLoginAsync(CancellationToken ct)
+    {
+        try { await Task.Delay(TimeSpan.FromSeconds(45), ct); }
+        catch (OperationCanceledException) { return; }
+        if (!ct.IsCancellationRequested && Vm is { LoginBackground: true, PigaiLoginOpen: true } vm)
+            vm.ShowManualLogin("pigai", "静默登录未完成，请处理验证或在当前页面手动登录…");
+    }
+
+    private void StopSilentFallback()
+    {
+        var cts = _silentCts;
+        _silentCts = null;
+        if (cts is null) return;
+        try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        cts.Dispose();
     }
 
     private MainViewModel? Vm => DataContext as MainViewModel;
@@ -73,25 +125,36 @@ public partial class PigaiLoginView : UserControl
     {
         base.OnDetachedFromVisualTree(e);
         if (Vm is { } vm) vm.PropertyChanged -= OnVmPropertyChanged;
+        StopSilentFallback();
         StopWaiting();
     }
 
     private void OnVmPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(MainViewModel.LoginBackground))
+        {
+            if (Vm?.LoginBackground == false)
+            {
+                PigaiWebView.InvalidateMeasure();
+                PigaiWebView.InvalidateArrange();
+            }
+            return;
+        }
         if (e.PropertyName != nameof(MainViewModel.LoginPageOpen)) return;
 
         if (Vm is not { PigaiLoginOpen: true })
         {
-            // 覆盖层已关闭（含登录成功后的自动关闭）：停掉等待循环。
+            StopSilentFallback();
             StopWaiting();
             return;
         }
 
-        // 覆盖层重新打开时重新导航（_navigated 是一次性标志，与主窗口同生命周期）。
         _navigated = false;
+        _credentialSubmitted = false;
         WebViewPlaceholder.IsVisible = !_webViewReady;
         PigaiWebView.IsVisible = _webViewReady;
         NavigateIfNeeded();
+        StartSilentFallback();
 
         // 让托管布局重跑一遍，把原生控件按最终边界重新定位
         // （与 LoginView.ShowWebView 同理：原生面在隐藏期间不会随控件边界同步）。
@@ -105,7 +168,10 @@ public partial class PigaiLoginView : UserControl
     {
         if (!_webViewReady || _navigated) return;
         _navigated = true;
-        try { PigaiWebView.Navigate(new Uri(PigaiLoginService.LoginUrl)); }
+        var url = Vm?.PigaiPreferWeChat == true
+            ? PigaiLoginService.WeChatLoginUrl
+            : PigaiLoginService.LoginUrl;
+        try { PigaiWebView.Navigate(new Uri(url)); }
         catch (Exception) { /* 导航失败停留在占位 */ }
     }
 
@@ -143,7 +209,7 @@ public partial class PigaiLoginView : UserControl
             // 与雨课堂同款：循环内部 Task.Delay + ConfigureAwait(true)，
             // 保证每次探测都回到 UI 线程；探测自身在服务里带 3s 超时。
             var session = await PigaiLoginService
-                .WaitForLoginAsync(PigaiWebView, ct: ct)
+                .WaitForLoginAsync(PigaiWebView, pageGate: _pageGate, ct: ct)
                 .ConfigureAwait(true);
 
             if (session is null)

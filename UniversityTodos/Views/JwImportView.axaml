@@ -9,26 +9,22 @@
              Background="{Binding SurfaceBrush}">
 
   <!--
-    教务课表导入的**控制面板**。
-    真正的教务系统网页在一个**独立弹窗**里（NativeWebDialog）——
-    与「长江雨课堂登录」同款形态：弹窗浮在应用之上，不与应用内容挤在同一块区域。
-
-    面板本身因此不再承载 WebView，只负责：说明、状态、手动触发、回到课表的入口。
-    手动按钮是悬浮球之外的第二条路径：若注入被页面结构挡住，用户仍有办法抓取。
+    教务课表与考试信息共用的控制面板。真正的教务网页在独立 NativeWebDialog 中。
+    课表保留悬浮球与手动抓取；考试模式进入查询页后自动读取，手动按钮用于重试。
   -->
   <Grid RowDefinitions="Auto,Auto,*,Auto">
     <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="26,20,26,0">
       <StackPanel Grid.Column="0" Spacing="3">
-        <TextBlock Text="导入教务课表" FontSize="20" FontWeight="SemiBold"
+        <TextBlock Text="{Binding JwImportTitle}" FontSize="20" FontWeight="SemiBold"
                    Foreground="{DynamicResource TodoTextPrimary}" />
-        <TextBlock Text="教务系统已在独立窗口中打开；登录并进入「课表查询」页后，点窗口右下角的蓝色按钮抓取"
+        <TextBlock Text="{Binding JwImportDescription}"
                    FontSize="12" TextWrapping="Wrap"
                    Foreground="{DynamicResource TodoTextSecondary}" />
       </StackPanel>
       <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
         <Button Classes="outline" Content="重新打开教务窗口" Padding="10,5" FontSize="12"
                 Click="OnReopenWindowClick" />
-        <Button Classes="primary" Content="返回课表" Padding="10,5" FontSize="12"
+        <Button Classes="primary" Content="{Binding JwReturnButtonText}" Padding="10,5" FontSize="12"
                 Click="OnCloseClick" />
       </StackPanel>
     </Grid>
@@ -49,14 +45,14 @@
                  Foreground="{DynamicResource TodoTextTertiary}" />
       <TextBlock FontSize="13" TextWrapping="Wrap" TextAlignment="Center" LineHeight="21"
                  Foreground="{DynamicResource TodoTextSecondary}"
-                 Text="在教务窗口里完成登录，点进「个人课表查询」，然后：&#x0a;① 点窗口右下角的「一键获取课表」；&#x0a;② 或回到这里点下面的「抓取当前页课表」。" />
-      <Button Classes="primary" Content="抓取当前页课表" Padding="16,9" FontSize="13"
+                 Text="{Binding JwImportGuide}" />
+      <Button Classes="primary" Content="{Binding JwFetchButtonText}" Padding="16,9" FontSize="13"
               HorizontalAlignment="Center"
               Click="OnManualFetchClick"
-              ToolTip.Tip="读取教务窗口当前显示的页面并解析课表" />
+              IsEnabled="{Binding !ExamInfo.IsLoading}" />
       <TextBlock FontSize="11" TextWrapping="Wrap" TextAlignment="Center"
                  Foreground="{DynamicResource TodoTextTertiary}"
-                 Text="本工具不代填账号、不代提交，只读取你已打开的那个页面。" />
+                 Text="手动登录教务系统后读取当前数据，不保存或自动提交教务账密，不修改远端数据。" />
     </StackPanel>
 
     <!-- 底部：窗口状态 -->

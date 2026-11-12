@@ -202,8 +202,11 @@
     <Setter Property="TextAlignment" Value="Center" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
   </Style>
-  <!-- 节次时间输入框：文字在箭头/边框以内的文字区域水平居中。 -->
-  <Style Selector="views|SettingsView TextBox.period-time">
+  <Style Selector="views|SettingsView TimePicker.period-time">
+    <Setter Property="Height" Value="40" />
+    <Setter Property="MinHeight" Value="40" />
+  </Style>
+  <Style Selector="views|SettingsView TimePicker.period-time TextBox">
     <Setter Property="TextAlignment" Value="Center" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
   </Style>
@@ -424,20 +427,12 @@
     <Setter Property="Foreground" Value="{DynamicResource TodoAccent}" />
   </Style>
 
-  <!-- 节次编辑器：每节一张卡片，时间使用居中的 filled 输入框，不再显示下划线。 -->
+  <!-- 节次编辑器：每节一张卡片，起止时间使用选择控件。 -->
   <Style Selector="views|SettingsView Border.period-edit-card">
     <Setter Property="Background" Value="{DynamicResource TodoHover}" />
     <Setter Property="CornerRadius" Value="12" />
     <Setter Property="Padding" Value="12,8" />
     <Setter Property="Margin" Value="0,4" />
-  </Style>
-  <Style Selector="views|SettingsView TextBox.period-time /template/ Border#PART_BackgroundTextField">
-    <Setter Property="Background" Value="{DynamicResource TodoDialogBackground}" />
-    <Setter Property="CornerRadius" Value="10" />
-    <Setter Property="BorderThickness" Value="0" />
-  </Style>
-  <Style Selector="views|SettingsView TextBox.period-time /template/ material|MaterialUnderline#PART_Underline">
-    <Setter Property="IsVisible" Value="False" />
   </Style>
 
   <!-- ============ 移动紧凑课表（七列同屏） ============

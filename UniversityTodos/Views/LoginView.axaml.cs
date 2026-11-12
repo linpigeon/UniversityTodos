@@ -145,6 +145,8 @@ public partial class LoginView : UserControl
         "return out.join('\\n');})()";
 
 
+    private readonly PageReadyGate _pageGate = new();
+
     public LoginView()
     {
         InitializeComponent();
@@ -152,11 +154,20 @@ public partial class LoginView : UserControl
         LoginWebView.AdapterCreated += (_, _) =>
         {
             _webViewUsable = true;
-            // 适配器就绪后把占位收起来，露出真正的登录页。
+            _pageGate.MarkAdapterCreated();
             WebViewPlaceholder.IsVisible = false;
         };
-        LoginWebView.AdapterDestroyed += (_, _) => _webViewUsable = false;
-        LoginWebView.NavigationCompleted += async (_, _) => await InjectLoginPageStyleAsync();
+        LoginWebView.AdapterDestroyed += (_, _) =>
+        {
+            _webViewUsable = false;
+            _pageGate.Reset();
+        };
+        LoginWebView.NavigationStarted += (_, _) => _pageGate.MarkNavigating();
+        LoginWebView.NavigationCompleted += async (_, _) =>
+        {
+            _pageGate.MarkReady();
+            await InjectLoginPageStyleAsync();
+        };
     }
 
     /// <summary>
@@ -170,14 +181,15 @@ public partial class LoginView : UserControl
     {
         try
         {
-            // Android 上扫码无意义（微信就在本机），直接切账号登录；
-            // 桌面端沿用 QR 卡片的美化脚本。
+            if (!_pageGate.HasCompletedNavigation) return;
+            // Android 上扫码无意义（微信就在本机），直接切账号登录；桌面沿用扫码页样式。
             var script = OperatingSystem.IsAndroid() ? AccountModeScript : LoginPageStyleScript;
             await LoginWebView.InvokeScript(script).ConfigureAwait(true);
 
             foreach (var delay in new[] { 1, 2, 3 })
             {
                 await Task.Delay(TimeSpan.FromSeconds(delay)).ConfigureAwait(true);
+                if (!_pageGate.HasCompletedNavigation) return;
                 await LoginWebView.InvokeScript(script).ConfigureAwait(true);
             }
 
@@ -244,6 +256,11 @@ public partial class LoginView : UserControl
 
     private void OnVmPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(MainViewModel.LoginBackground))
+        {
+            if (Vm is { LoginBackground: false, LoginPageOpen: "ykt" }) ShowWebView();
+            return;
+        }
         if (e.PropertyName != nameof(MainViewModel.LoginPageOpen)) return;
         if (Vm is not { LoginPageOpen: "ykt" }) return;
 
@@ -290,12 +307,16 @@ public partial class LoginView : UserControl
                     await YktLoginService.ClearCookiesAsync(LoginWebView);
             }
 
-            // isAutoDetect: true —— 后台检测，不占用按钮的可点状态。
-            _ = vm.CompleteLoginAsync(LoginWebView, isAutoDetect: true);
+            // 静默登录不能被同步忙碌状态跳过；普通自动检测仍保持按钮可点。
+            _ = vm.CompleteLoginAsync(
+                LoginWebView, isAutoDetect: !vm.LoginBackground, pageGate: _pageGate);
         }
         catch (Exception ex)
         {
-            vm.LoginStatusText = $"登录页初始化失败：{ex.Message}";
+            if (vm.LoginBackground)
+                vm.ShowManualLogin("ykt", $"登录页初始化失败：{ex.Message}");
+            else
+                vm.LoginStatusText = $"登录页初始化失败：{ex.Message}";
         }
     }
 
@@ -316,7 +337,8 @@ public partial class LoginView : UserControl
         {
             // isAutoDetect: false —— 用户主动检测，会打断后台自动检测
             // quickProbe:      页面里已经有登录态时直接接管并同步，不必等轮询
-            await vm.CompleteLoginAsync(LoginWebView, isAutoDetect: false, quickProbe: true);
+            await vm.CompleteLoginAsync(
+                LoginWebView, isAutoDetect: false, quickProbe: true, pageGate: _pageGate);
         }
         catch (Exception ex)
         {

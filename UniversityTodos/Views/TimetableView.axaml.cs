@@ -335,5 +335,7 @@ public partial class TimetableView : UserControl
 
     private void OnImportClick(object? sender, RoutedEventArgs e) => Vm?.OpenJwImport();
 
+    private void OnExamsClick(object? sender, RoutedEventArgs e) => Vm?.OpenExamInfo();
+
     private void OnCloseClick(object? sender, RoutedEventArgs e) => Vm?.CloseTimetable();
 }

@@ -1,0 +1,272 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:UniversityTodos.ViewModels"
+             xmlns:models="using:UniversityTodos.Models"
+             x:Class="UniversityTodos.Views.ElectricityView"
+             x:DataType="vm:MainViewModel">
+  <Border Background="{DynamicResource TodoDialogBackground}">
+    <Grid RowDefinitions="Auto,*">
+      <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="26,20,26,0">
+        <StackPanel Grid.Column="0" Spacing="2">
+          <TextBlock Text="宿舍水电费" FontSize="20" FontWeight="SemiBold"
+                     Foreground="{DynamicResource TodoTextPrimary}" />
+          <TextBlock Text="完美校园电费 · 统一认证水费" FontSize="12"
+                     Foreground="{DynamicResource TodoTextSecondary}" />
+        </StackPanel>
+        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+          <Button Classes="outline" Content="刷新" Padding="10,5" FontSize="12"
+                  Command="{Binding RefreshElectricityCommand}"
+                  IsEnabled="{Binding !Electricity.IsLoading}" />
+          <Button Classes="tool" Content="返回" Padding="10,5" FontSize="12"
+                  Command="{Binding CloseElectricityCommand}" />
+        </StackPanel>
+      </Grid>
+
+      <ScrollViewer Grid.Row="1" Margin="26,14,26,22">
+        <Grid Name="UtilityColumns">
+          <StackPanel Name="ElectricityColumn" Grid.Column="0" Spacing="14">
+          <Border Background="{DynamicResource TodoSurface}" CornerRadius="6" Padding="16">
+            <StackPanel Spacing="12">
+              <TextBlock Text="完美校园账号" FontSize="14" FontWeight="SemiBold"
+                         Foreground="{DynamicResource TodoTextPrimary}" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBox Text="{Binding Electricity.Account, Mode=TwoWay}" Width="180"
+                         PlaceholderText="请输入学号" />
+                <Button Classes="primary" Content="保存学号" Padding="12,5" FontSize="12"
+                        Command="{Binding SaveElectricityAccountCommand}" />
+              </StackPanel>
+              <Grid ColumnDefinitions="Auto,Auto,*" ColumnSpacing="10">
+                <TextBlock Grid.Column="0" Text="低电量阈值" FontSize="12" VerticalAlignment="Center"
+                           Foreground="{DynamicResource TodoTextSecondary}" />
+                <NumericUpDown Grid.Column="1" Minimum="0" Maximum="100000" Increment="1"
+                               FormatString="0.##" Width="110"
+                               Value="{Binding Electricity.LowBalanceThresholdInput, Mode=TwoWay}" />
+                <TextBlock Grid.Column="2" Text="度" FontSize="12" VerticalAlignment="Center"
+                           Foreground="{DynamicResource TodoTextTertiary}" />
+              </Grid>
+              <ToggleSwitch Content="低于阈值时发送系统通知" OnContent="开" OffContent="关"
+                            IsChecked="{Binding Electricity.NotifyLowBalance, Mode=TwoWay}"
+                            FontSize="12" Foreground="{DynamicResource TodoTextSecondary}" />
+              <TextBlock FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoTextTertiary}"
+                         Text="首次查询只建立提醒基线；之后新低于阈值的宿舍会提醒一次，充值恢复后再次变低可重新提醒。" />
+            </StackPanel>
+          </Border>
+
+          <ProgressBar IsIndeterminate="True" Height="3"
+                       IsVisible="{Binding Electricity.IsLoading}" />
+          <TextBlock Text="{Binding Electricity.StatusMessage}" FontSize="12" TextWrapping="Wrap"
+                     Foreground="{DynamicResource TodoTextSecondary}" />
+
+          <Border Background="{DynamicResource TodoWarningBackground}" CornerRadius="6" Padding="14"
+                  BorderBrush="{DynamicResource TodoWarningBorder}" BorderThickness="1"
+                  IsVisible="{Binding Electricity.SelectedRoomLowBalance}">
+            <TextBlock FontSize="13" FontWeight="SemiBold" TextWrapping="Wrap"
+                       Foreground="{DynamicResource TodoWarningBorder}"
+                       Text="{Binding Electricity.SelectedRoomLowBalanceText}" />
+          </Border>
+
+          <Border Background="{DynamicResource TodoSurface}" CornerRadius="6" Padding="20"
+                  IsVisible="{Binding Electricity.HasSelectedRoom}">
+            <StackPanel Spacing="14">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Grid.Column="0" Text="{Binding Electricity.SelectedRoomName}"
+                           FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap"
+                           Foreground="{DynamicResource TodoTextPrimary}" />
+                <Border Grid.Column="1" Background="{DynamicResource TodoAccentSoft}"
+                        CornerRadius="4" Padding="7,2">
+                  <TextBlock Text="{Binding Electricity.SelectedRoomStatusText}" FontSize="11"
+                             Foreground="{DynamicResource TodoAccent}" />
+                </Border>
+              </Grid>
+              <StackPanel Spacing="2">
+                <TextBlock Text="剩余电量" FontSize="12"
+                           Foreground="{DynamicResource TodoTextSecondary}" />
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                  <TextBlock Text="{Binding Electricity.SelectedRoomOddText}"
+                             FontSize="38" FontWeight="SemiBold"
+                             Foreground="{DynamicResource TodoAccent}" />
+                  <TextBlock Text="度" FontSize="16" VerticalAlignment="Bottom" Margin="0,0,0,7"
+                             Foreground="{DynamicResource TodoTextSecondary}" />
+                </StackPanel>
+              </StackPanel>
+              <Grid ColumnDefinitions="Auto,*" ColumnSpacing="16" RowDefinitions="Auto,Auto" RowSpacing="8">
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="累计用量" FontSize="12"
+                           Foreground="{DynamicResource TodoTextSecondary}" />
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Electricity.SelectedRoomUseText}"
+                           FontSize="13" Foreground="{DynamicResource TodoTextPrimary}" />
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="数据时间" FontSize="12"
+                           Foreground="{DynamicResource TodoTextSecondary}" />
+                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Electricity.LastUpdatedText}"
+                           FontSize="13" Foreground="{DynamicResource TodoTextPrimary}" />
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <StackPanel Spacing="8" IsVisible="{Binding Electricity.HasRooms}">
+            <TextBlock Text="选择宿舍" FontSize="13" FontWeight="SemiBold"
+                       Foreground="{DynamicResource TodoTextPrimary}" />
+            <ListBox ItemsSource="{Binding Electricity.Rooms}"
+                     SelectedItem="{Binding Electricity.SelectedRoom, Mode=TwoWay}"
+                     MaxHeight="230" Background="Transparent">
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="models:ElectricityRoom">
+                  <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
+                    <TextBlock Grid.Column="0" Text="{Binding RoomName}" FontSize="12"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="1" Text="{Binding Odd, StringFormat='{}{0:F2} 度'}"
+                               FontSize="12" Foreground="{DynamicResource TodoAccent}" />
+                    <TextBlock Grid.Column="2" Text="{Binding StatusText}" FontSize="11"
+                               Foreground="{DynamicResource TodoTextTertiary}" />
+                  </Grid>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </StackPanel>
+
+          <Border Background="{DynamicResource TodoSurface}" CornerRadius="6" Padding="22"
+                  IsVisible="{Binding !Electricity.HasRooms}">
+            <TextBlock Text="{Binding Electricity.EmptyMessage}" TextWrapping="Wrap"
+                       HorizontalAlignment="Center" FontSize="13"
+                       Foreground="{DynamicResource TodoTextTertiary}" />
+          </Border>
+
+          </StackPanel>
+          <StackPanel Name="WaterColumn" Grid.Column="1" Spacing="14">
+          <Border Background="{DynamicResource TodoSurface}" CornerRadius="6" Padding="16">
+            <StackPanel Spacing="12">
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Grid.Column="0" Spacing="2">
+                  <TextBlock Text="宿舍水费" FontSize="16" FontWeight="SemiBold"
+                             Foreground="{DynamicResource TodoTextPrimary}" />
+                  <TextBlock Text="统一身份认证 · 按学期第一周周一划分" FontSize="11"
+                             Foreground="{DynamicResource TodoTextTertiary}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                  <Button Classes="primary" Content="查询水费" Padding="12,5" FontSize="12"
+                          Command="{Binding RefreshWaterCommand}"
+                          IsEnabled="{Binding !Water.IsLoading}" />
+                  <Button Classes="outline" Content="取消" Padding="10,5" FontSize="12"
+                          Command="{Binding CancelWaterQueryCommand}"
+                          IsVisible="{Binding Water.IsLoading}" />
+                </StackPanel>
+              </Grid>
+
+              <Border Background="{DynamicResource TodoAccentSoft}" CornerRadius="4" Padding="10,7">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <TextBlock Text="统一认证" FontSize="11" FontWeight="SemiBold"
+                             VerticalAlignment="Center" Foreground="{DynamicResource TodoAccent}" />
+                  <TextBlock Text="{Binding WaterCredentialStatus}" FontSize="11" TextWrapping="Wrap"
+                             VerticalAlignment="Center" Foreground="{DynamicResource TodoTextSecondary}" />
+                </StackPanel>
+              </Border>
+              <TextBlock Text="{Binding Water.StatusMessage}" FontSize="12" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoTextSecondary}" />
+              <ProgressBar IsIndeterminate="True" Height="3"
+                           IsVisible="{Binding Water.IsLoading}" />
+              <StackPanel Spacing="4">
+                <ToggleSwitch Content="显示往期水费" OnContent="开" OffContent="关"
+                              IsChecked="{Binding ShowWaterHistory, Mode=TwoWay}"
+                              IsEnabled="{Binding !Water.IsLoading}"
+                              FontSize="12" Foreground="{DynamicResource TodoTextSecondary}" />
+                <TextBlock Text="开启后逐页读取并缓存历史账单，首次查询可能稍慢" FontSize="11"
+                           TextWrapping="Wrap" Foreground="{DynamicResource TodoTextTertiary}" />
+              </StackPanel>
+
+              <StackPanel Spacing="12" IsVisible="{Binding Water.HasData}">
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Grid.Column="0" Text="{Binding Water.PeriodText}" FontSize="13"
+                             FontWeight="SemiBold" Foreground="{DynamicResource TodoTextPrimary}" />
+                  <TextBlock Grid.Column="1" Text="{Binding Water.RoomText}" FontSize="12"
+                             Foreground="{DynamicResource TodoTextSecondary}" />
+                </Grid>
+
+                <ItemsControl ItemsSource="{Binding Water.LatestBills}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="models:WaterBill">
+                      <Border Background="{DynamicResource TodoAccentSoft}" CornerRadius="4"
+                              Padding="12" Margin="0,2">
+                        <Grid ColumnDefinitions="*,Auto,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="14">
+                          <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding WaterType}" FontSize="14"
+                                     FontWeight="SemiBold" Foreground="{DynamicResource TodoTextPrimary}" />
+                          <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Usage, StringFormat='{}{0:F2} m³'}"
+                                     FontSize="13" Foreground="{DynamicResource TodoTextSecondary}" />
+                          <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding Fee, StringFormat='{}¥ {0:F2}'}"
+                                     FontSize="16" FontWeight="SemiBold"
+                                     Foreground="{DynamicResource TodoAccent}" />
+                          <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="3"
+                                      Orientation="Horizontal" Spacing="5" Margin="0,4,0,0">
+                            <TextBlock Text="{Binding StartDate}" FontSize="11"
+                                       Foreground="{DynamicResource TodoTextTertiary}" />
+                            <TextBlock Text="–" FontSize="11"
+                                       Foreground="{DynamicResource TodoTextTertiary}" />
+                            <TextBlock Text="{Binding EndDate}" FontSize="11"
+                                       Foreground="{DynamicResource TodoTextTertiary}" />
+                          </StackPanel>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12">
+                  <TextBlock Grid.Column="0" Text="本学期合计" FontSize="13"
+                             Foreground="{DynamicResource TodoTextSecondary}" />
+                  <TextBlock Grid.Column="1" Text="{Binding Water.TotalUsage, StringFormat='{}{0:F2} m³'}"
+                             FontSize="13" Foreground="{DynamicResource TodoTextSecondary}" />
+                  <TextBlock Grid.Column="2" Text="{Binding Water.TotalFee, StringFormat='{}¥ {0:F2}'}"
+                             FontSize="20" FontWeight="SemiBold"
+                             Foreground="{DynamicResource TodoAccent}" />
+                </Grid>
+                <TextBlock Text="{Binding Water.LastUpdatedText}" FontSize="11"
+                           Foreground="{DynamicResource TodoTextTertiary}" />
+              </StackPanel>
+
+              <StackPanel Spacing="10" IsVisible="{Binding Water.ShowHistoryBills}">
+                <Border Height="1" Background="{DynamicResource TodoBorder}" />
+                <Grid ColumnDefinitions="*,Auto">
+                  <TextBlock Grid.Column="0" Text="往期水费" FontSize="14" FontWeight="SemiBold"
+                             Foreground="{DynamicResource TodoTextPrimary}" />
+                  <TextBlock Grid.Column="1" Text="{Binding Water.HistoryCountText}" FontSize="11"
+                             Foreground="{DynamicResource TodoTextTertiary}" />
+                </Grid>
+                <ItemsControl ItemsSource="{Binding Water.HistoryBills}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="models:WaterBill">
+                      <Border Background="{DynamicResource TodoDialogBackground}" CornerRadius="4"
+                              Padding="12" Margin="0,2">
+                        <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto"
+                              ColumnSpacing="12" RowSpacing="4">
+                          <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding WaterType}" FontSize="13"
+                                     FontWeight="SemiBold" Foreground="{DynamicResource TodoTextPrimary}" />
+                          <TextBlock Grid.Row="0" Grid.Column="1" Grid.RowSpan="3"
+                                     VerticalAlignment="Center"
+                                     Text="{Binding Fee, StringFormat='{}¥ {0:F2}'}" FontSize="15"
+                                     FontWeight="SemiBold" Foreground="{DynamicResource TodoAccent}" />
+                          <StackPanel Grid.Row="1" Grid.Column="0" Orientation="Horizontal" Spacing="5">
+                            <TextBlock Text="{Binding StartDate}" FontSize="11"
+                                       Foreground="{DynamicResource TodoTextSecondary}" />
+                            <TextBlock Text="–" FontSize="11"
+                                       Foreground="{DynamicResource TodoTextSecondary}" />
+                            <TextBlock Text="{Binding EndDate}" FontSize="11"
+                                       Foreground="{DynamicResource TodoTextSecondary}" />
+                          </StackPanel>
+                          <TextBlock Grid.Row="2" Grid.Column="0"
+                                     Text="{Binding Usage, StringFormat='{}用量 {0:F2} m³'}" FontSize="11"
+                                     Foreground="{DynamicResource TodoTextTertiary}" />
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <TextBlock Text="{Binding Water.LastUpdatedText}" FontSize="11"
+                           Foreground="{DynamicResource TodoTextTertiary}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+          </StackPanel>
+        </Grid>
+      </ScrollViewer>
+    </Grid>
+  </Border>
+</UserControl>

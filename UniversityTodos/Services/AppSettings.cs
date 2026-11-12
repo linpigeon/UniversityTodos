@@ -80,6 +80,15 @@ public sealed class AppSettings
     /// <summary>发现新作业时是否发系统通知。</summary>
     public bool NotifyOnNewHomework { get; set; } = true;
 
+    /// <summary>完美校园学号（宿舍电费查询）。</summary>
+    public string ElectricityAccount { get; set; } = string.Empty;
+
+    /// <summary>宿舍剩余电量低于该值时提醒（度）。</summary>
+    public double ElectricityLowBalanceThreshold { get; set; } = 20;
+
+    /// <summary>是否发送宿舍低电量系统通知。</summary>
+    public bool NotifyElectricityLowBalance { get; set; } = true;
+
     /// <summary>是否在截止前发「即将截止」提醒。</summary>
     public bool NotifyDueSoon { get; set; } = true;
 

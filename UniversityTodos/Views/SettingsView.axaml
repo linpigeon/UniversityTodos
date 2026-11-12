@@ -152,11 +152,17 @@
               <StackPanel Spacing="6">
                 <TextBlock Text="学期第一周的周一" FontSize="12"
                            Foreground="{DynamicResource TodoTextSecondary}" />
-                <TextBox Text="{Binding TermStartDateInput, Mode=TwoWay}" Width="150"
-                         HorizontalAlignment="Left" PlaceholderText="2026-09-07" />
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                  <CalendarDatePicker SelectedDate="{Binding TermStartDate, Mode=TwoWay}"
+                                      Width="150" MaxWidth="150"
+                                      SelectedDateFormat="Custom" CustomDateFormatString="yyyy-MM-dd"
+                                      PlaceholderText="选择日期" HorizontalAlignment="Left" />
+                  <Button Classes="outline" Content="清除" Padding="8,4" FontSize="11"
+                          VerticalAlignment="Center" Command="{Binding ClearTermStartDateCommand}" />
+                </StackPanel>
                 <TextBlock FontSize="11" TextWrapping="Wrap"
                            Foreground="{DynamicResource TodoTextTertiary}"
-                           Text="格式 2026-09-07（必须是周一）。课表用周次表示，没有这个基准就只显示周次、不显示日期。" />
+                           Text="通过日历选择学期第一周周一。课表用周次表示，没有这个基准就只显示周次、不显示日期。" />
               </StackPanel>
             </StackPanel>
 
@@ -239,9 +245,9 @@
                     IsVisible="{Binding NotifyOverdue}">
                 <TextBlock Grid.Column="0" Text="汇总时间" FontSize="13" VerticalAlignment="Center"
                            Foreground="{DynamicResource TodoTextSecondary}" />
-                <TextBox Grid.Column="1" Width="100" HorizontalAlignment="Left"
-                         Text="{Binding OverdueDigestTime, Mode=TwoWay}"
-                         PlaceholderText="08:00" />
+                <TimePicker Grid.Column="1" Width="130" HorizontalAlignment="Left"
+                            SelectedTime="{Binding OverdueDigestTimeValue, Mode=TwoWay}"
+                            ClockIdentifier="24HourClock" UseSeconds="False" MinuteIncrement="1" />
               </Grid>
               <TextBlock FontSize="11" TextWrapping="Wrap"
                          Foreground="{DynamicResource TodoTextTertiary}"
@@ -293,17 +299,43 @@
                 <TextBox Text="{Binding JwLoginUrlInput, Mode=TwoWay}" MinWidth="320"
                          HorizontalAlignment="Left"
                          PlaceholderText="https://jw.example.edu.cn/" />
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                  <Button Classes="outline" Content="保存网址" Padding="10,5" FontSize="12"
-                          Click="OnSaveJwUrlClick" />
-                  <TextBlock Text="{Binding TimetableStatus}" FontSize="11"
-                             VerticalAlignment="Center" TextWrapping="Wrap"
-                             Foreground="{DynamicResource TodoTextTertiary}" />
-                </StackPanel>
-                <TextBlock FontSize="11" TextWrapping="Wrap"
-                           Foreground="{DynamicResource TodoTextTertiary}"
-                           Text="填学校教务系统（正方等）的登录页地址。导入时在内嵌窗口里自行登录并进入课表查询页，再点页面右下角的蓝色按钮抓取——本工具不代填账号、不代提交。" />
+                <Button Classes="outline" Content="保存网址" Padding="10,5" FontSize="12"
+                        HorizontalAlignment="Left" Click="OnSaveJwUrlClick" />
+                <TextBlock Text="{Binding TimetableStatus}" FontSize="11"
+                           TextWrapping="Wrap" Foreground="{DynamicResource TodoTextTertiary}" />
               </StackPanel>
+
+              <TextBlock FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoTextTertiary}"
+                         Text="导入时在弹出的教务系统 WebView 中手动登录，再进入课表查询页抓取；应用不保存或自动提交教务账密。" />
+            </StackPanel>
+
+            <StackPanel Spacing="12">
+              <TextBlock Text="统一身份认证（宿舍水费）" FontSize="14" FontWeight="SemiBold"
+                         Foreground="{DynamicResource TodoTextPrimary}" />
+              <Grid ColumnDefinitions="60,180,60,180" ColumnSpacing="8" RowSpacing="8">
+                <TextBlock Grid.Column="0" Text="学号" FontSize="12" VerticalAlignment="Center"
+                           Foreground="{DynamicResource TodoTextSecondary}" />
+                <TextBox Grid.Column="1" Text="{Binding WaterAccountInput, Mode=TwoWay}" />
+                <TextBlock Grid.Column="2" Text="密码" FontSize="12" VerticalAlignment="Center"
+                           Foreground="{DynamicResource TodoTextSecondary}" />
+                <TextBox Grid.Column="3" Text="{Binding WaterPasswordInput, Mode=TwoWay}"
+                         PasswordChar="&#x25CF;" />
+              </Grid>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes="outline" Content="加密保存凭据" Padding="10,5" FontSize="12"
+                        Command="{Binding SaveWaterCredentialsCommand}" />
+                <Button Classes="primary" Content="统一认证登录" Padding="10,5" FontSize="12"
+                        Command="{Binding OpenWaterLoginCommand}" />
+                <Button Classes="tool" Content="清除" Padding="10,5" FontSize="12"
+                        Command="{Binding ClearWaterCredentialsCommand}"
+                        IsVisible="{Binding HasWaterCredentials}" />
+              </StackPanel>
+              <TextBlock Text="{Binding WaterCredentialStatus}" FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoTextSecondary}" />
+              <TextBlock FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoTextTertiary}"
+                         Text="在此处完成一次登录后，认证会话会加密保存在本机；冷启动查询优先在后台恢复会话，失效时才打开此页面。" />
             </StackPanel>
 
             <!-- 雨课堂 -->
@@ -322,6 +354,9 @@
                         Click="OnYktLogoutClick"
                         IsVisible="{Binding !NoYktAccount}" />
               </StackPanel>
+              <TextBlock FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoTextTertiary}"
+                         Text="在打开的 WebView 中手动登录；支持扫码、雨课堂账密或粘贴 Cookie，应用不保存或自动提交雨课堂账密。" />
             </StackPanel>
 
             <!-- 学习通 -->
@@ -337,9 +372,29 @@
                         Click="OnChaoxingLogoutClick"
                         IsVisible="{Binding HasChaoxingSession}" />
               </StackPanel>
+              <Grid ColumnDefinitions="60,180,60,180" ColumnSpacing="8" RowSpacing="8">
+                <TextBlock Grid.Column="0" Text="学号" FontSize="12" VerticalAlignment="Center"
+                           Foreground="{DynamicResource TodoTextSecondary}" />
+                <TextBox Grid.Column="1" Text="{Binding ChaoxingCredential.AccountInput, Mode=TwoWay}" />
+                <TextBlock Grid.Column="2" Text="密码" FontSize="12" VerticalAlignment="Center"
+                           Foreground="{DynamicResource TodoTextSecondary}" />
+                <TextBox Grid.Column="3" Text="{Binding ChaoxingCredential.PasswordInput, Mode=TwoWay}"
+                         PasswordChar="&#x25CF;" />
+              </Grid>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes="outline" Content="加密保存凭据" Padding="10,5" FontSize="12"
+                        Command="{Binding SaveChaoxingCredentialsCommand}" />
+                <Button Classes="primary" Content="账密一键登录" Padding="10,5" FontSize="12"
+                        Command="{Binding OpenChaoxingCredentialLoginCommand}" />
+                <Button Classes="tool" Content="清除" Padding="10,5" FontSize="12"
+                        Command="{Binding ClearChaoxingCredentialsCommand}"
+                        IsVisible="{Binding ChaoxingCredential.HasCredential}" />
+              </StackPanel>
+              <TextBlock Text="{Binding ChaoxingCredential.Status}" FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoTextSecondary}" />
               <TextBlock FontSize="11" TextWrapping="Wrap"
                          Foreground="{DynamicResource TodoTextTertiary}"
-                         Text="同步作业与考试两个列表。登录在应用内嵌的超星登录页完成，应用只保存会话 Cookie。" />
+                         Text="同步作业与考试两个列表。优先复用会话 Cookie，也可单独加密保存账密用于一键登录。" />
             </StackPanel>
 
             <!-- 批改网 -->
@@ -351,13 +406,35 @@
               <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button Classes="outline" Content="登录批改网" Padding="10,5" FontSize="12"
                         Click="OnPigaiLoginClick" />
+                <Button Classes="outline" Content="微信授权登录" Padding="10,5" FontSize="12"
+                        Command="{Binding OpenPigaiWeChatLoginCommand}" />
                 <Button Classes="tool" Content="退出" Padding="10,5" FontSize="12"
                         Click="OnPigaiLogoutClick"
                         IsVisible="{Binding HasPigaiSession}" />
               </StackPanel>
+              <Grid ColumnDefinitions="60,180,60,180" ColumnSpacing="8" RowSpacing="8">
+                <TextBlock Grid.Column="0" Text="学号" FontSize="12" VerticalAlignment="Center"
+                           Foreground="{DynamicResource TodoTextSecondary}" />
+                <TextBox Grid.Column="1" Text="{Binding PigaiCredential.AccountInput, Mode=TwoWay}" />
+                <TextBlock Grid.Column="2" Text="密码" FontSize="12" VerticalAlignment="Center"
+                           Foreground="{DynamicResource TodoTextSecondary}" />
+                <TextBox Grid.Column="3" Text="{Binding PigaiCredential.PasswordInput, Mode=TwoWay}"
+                         PasswordChar="&#x25CF;" />
+              </Grid>
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes="outline" Content="加密保存凭据" Padding="10,5" FontSize="12"
+                        Command="{Binding SavePigaiCredentialsCommand}" />
+                <Button Classes="primary" Content="账密一键登录" Padding="10,5" FontSize="12"
+                        Command="{Binding OpenPigaiCredentialLoginCommand}" />
+                <Button Classes="tool" Content="清除" Padding="10,5" FontSize="12"
+                        Command="{Binding ClearPigaiCredentialsCommand}"
+                        IsVisible="{Binding PigaiCredential.HasCredential}" />
+              </StackPanel>
+              <TextBlock Text="{Binding PigaiCredential.Status}" FontSize="11" TextWrapping="Wrap"
+                         Foreground="{DynamicResource TodoTextSecondary}" />
               <TextBlock FontSize="11" TextWrapping="Wrap"
                          Foreground="{DynamicResource TodoTextTertiary}"
-                         Text="同步「未完成作文」为待办。登录在应用内嵌的批改网页面完成，应用只保存会话 Cookie（DPAPI 加密），不保存账号密码。" />
+                         Text="同步「未完成作文」为待办。会话 Cookie 与可选的账密凭据分别加密保存，均只用于本机登录。" />
             </StackPanel>
 
           </StackPanel>
@@ -400,19 +477,21 @@
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="vm:PeriodRowViewModel">
                     <Grid>
-                    <Grid ColumnDefinitions="64,116,18,116,Auto,Auto" ColumnSpacing="6" Margin="0,3"
+                    <Grid ColumnDefinitions="64,150,18,150,Auto,Auto" ColumnSpacing="6" Margin="0,3"
                           IsVisible="{Binding !CompactMode}">
                       <TextBlock Grid.Column="0" VerticalAlignment="Center" FontSize="12"
                                  Foreground="{DynamicResource TodoTextSecondary}"
                                  Text="{Binding Period, StringFormat='第 {0} 节'}" />
-                      <TextBox Grid.Column="1" Classes="period-time"
-                               Text="{Binding StartTime, Mode=TwoWay}"
-                               FontSize="12" PlaceholderText="08:00" />
+                      <TimePicker Grid.Column="1" Classes="period-time"
+                                  Width="150" MinWidth="0" MaxWidth="150"
+                                  SelectedTime="{Binding StartTimeValue, Mode=TwoWay}"
+                                  ClockIdentifier="24HourClock" UseSeconds="False" MinuteIncrement="1" />
                       <TextBlock Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Center"
                                  FontSize="12" Foreground="{DynamicResource TodoTextTertiary}" Text="—" />
-                      <TextBox Grid.Column="3" Classes="period-time"
-                               Text="{Binding EndTime, Mode=TwoWay}"
-                               FontSize="12" PlaceholderText="08:45" />
+                      <TimePicker Grid.Column="3" Classes="period-time"
+                                  Width="150" MinWidth="0" MaxWidth="150"
+                                  SelectedTime="{Binding EndTimeValue, Mode=TwoWay}"
+                                  ClockIdentifier="24HourClock" UseSeconds="False" MinuteIncrement="1" />
                       <TextBlock Grid.Column="4" VerticalAlignment="Center" FontSize="11" Margin="6,0,0,0"
                                  IsVisible="{Binding HasDisabledHint}"
                                  Foreground="{DynamicResource TodoTextTertiary}"
@@ -445,12 +524,14 @@
                           </StackPanel>
                         </Grid>
                         <Grid Grid.Row="1" ColumnDefinitions="*,Auto,*" ColumnSpacing="8" Margin="0,6,0,0">
-                          <TextBox Grid.Column="0" Classes="period-time" Text="{Binding StartTime, Mode=TwoWay}"
-                                   FontSize="13" PlaceholderText="08:00" />
+                          <TimePicker Grid.Column="0" Classes="period-time" MinWidth="0"
+                                      SelectedTime="{Binding StartTimeValue, Mode=TwoWay}"
+                                      ClockIdentifier="24HourClock" UseSeconds="False" MinuteIncrement="1" />
                           <TextBlock Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center"
                                      FontSize="12" Foreground="{DynamicResource TodoTextTertiary}" Text="—" />
-                          <TextBox Grid.Column="2" Classes="period-time" Text="{Binding EndTime, Mode=TwoWay}"
-                                   FontSize="13" PlaceholderText="08:45" />
+                          <TimePicker Grid.Column="2" Classes="period-time" MinWidth="0"
+                                      SelectedTime="{Binding EndTimeValue, Mode=TwoWay}"
+                                      ClockIdentifier="24HourClock" UseSeconds="False" MinuteIncrement="1" />
                         </Grid>
                         <TextBlock Grid.Row="2" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"
                                    IsVisible="{Binding HasDisabledHint}"

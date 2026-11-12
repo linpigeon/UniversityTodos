@@ -14,7 +14,8 @@ namespace UniversityTodos.Services;
 /// 日志、WebView 缓存等一律不进包。
 /// </para>
 /// <para>
-/// 登录态是 DPAPI 密文，只能在同一台机器的同一 Windows 用户下解密；换机恢复后需要重新登录。
+/// Windows 登录态和账密凭据是 DPAPI 密文，只能在同一台机器的同一 Windows 用户下解密；
+/// Android 凭据同样依赖原 Keystore 密钥。换机、换用户或密钥不可用后需要重新登录并保存凭据。
 /// </para>
 /// </summary>
 public static class DataBackupService
@@ -30,8 +31,18 @@ public static class DataBackupService
         "manual-todos.json",
         "local-state.json",
         "reminder-state.json",
+        "electricity.json",
+        "electricity-reminder-state.json",
+        "water.json",
+        "water-session.json",
+        "water-credentials.json",
+        "chaoxing-credentials.json",
+        "pigai-credentials.json",
         "schedule.json",
+        "exams.json",
+        "grades.json",
         "jw-profile.json",
+        "jw-session.json",
     ];
 
     /// <summary>默认文件名（带时间戳，避免覆盖上一次备份）。</summary>
